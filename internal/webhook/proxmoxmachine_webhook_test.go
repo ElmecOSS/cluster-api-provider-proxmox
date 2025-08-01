@@ -1,5 +1,5 @@
 /*
-Copyright 2023-2024 IONOS Cloud.
+Copyright 2023-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,9 +19,10 @@ package webhook
 import (
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -77,6 +78,28 @@ var _ = Describe("Controller Test", func() {
 			machine.Spec.Network.AdditionalDevices[0].InterfaceConfig.Routing.RoutingPolicy[0].Table = nil
 			g.Expect(k8sClient.Create(testEnv.GetContext(), &machine)).To(MatchError(ContainSubstring("routing policy [0] requires a table")))
 		})
+
+		It("should disallow machine with network spec but without Default device", func() {
+			machine := validProxmoxMachine("test-machine")
+			machine.Spec.Network = &infrav1.NetworkSpec{
+				AdditionalDevices: []infrav1.AdditionalNetworkDevice{
+					{
+						Name: "net1",
+						NetworkDevice: infrav1.NetworkDevice{
+							Bridge: "vmbr2",
+							IPPoolConfig: infrav1.IPPoolConfig{
+								IPv4PoolRef: &corev1.TypedLocalObjectReference{
+									APIGroup: ptr.To("ipam.cluster.x-k8s.io"),
+									Kind:     "InClusterIPPool",
+									Name:     "simple-pool",
+								},
+							},
+						},
+					},
+				},
+			}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &machine)).To(MatchError(ContainSubstring("default network device must be set when setting network spec")))
+		})
 	})
 
 	Context("update proxmox cluster", func() {
@@ -99,6 +122,15 @@ var _ = Describe("Controller Test", func() {
 				WithPolling(time.Second).
 				Should(Succeed())
 		})
+
+		It("should not allow updates on tags", func() {
+			machine := validProxmoxMachine("test-machine-tags")
+			machine.Spec.Tags = []string{"foo_bar"}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &machine)).To(Succeed())
+
+			machine.Spec.Tags = []string{"foobar", "barfoo"}
+			g.Expect(k8sClient.Update(testEnv.GetContext(), &machine)).To(MatchError(ContainSubstring("tags are immutable")))
+		})
 	})
 })
 
@@ -110,7 +142,10 @@ func validProxmoxMachine(name string) infrav1.ProxmoxMachine {
 		},
 		Spec: infrav1.ProxmoxMachineSpec{
 			VirtualMachineCloneSpec: infrav1.VirtualMachineCloneSpec{
-				SourceNode: "pve",
+				TemplateSource: infrav1.TemplateSource{
+					SourceNode: "pve",
+					TemplateID: ptr.To[int32](100),
+				},
 			},
 			NumSockets: 1,
 			NumCores:   1,
@@ -136,13 +171,15 @@ func validProxmoxMachine(name string) infrav1.ProxmoxMachine {
 							Model:  ptr.To("virtio"),
 							MTU:    ptr.To(uint16(1500)),
 							VLAN:   ptr.To(uint16(100)),
+							IPPoolConfig: infrav1.IPPoolConfig{
+								IPv4PoolRef: &corev1.TypedLocalObjectReference{
+									Name:     "simple-pool",
+									Kind:     "InClusterIPPool",
+									APIGroup: ptr.To("ipam.cluster.x-k8s.io"),
+								},
+							},
 						},
 						InterfaceConfig: infrav1.InterfaceConfig{
-							IPv4PoolRef: &corev1.TypedLocalObjectReference{
-								Name:     "simple-pool",
-								Kind:     "InClusterIPPool",
-								APIGroup: ptr.To("ipam.cluster.x-k8s.io"),
-							},
 							Routing: infrav1.Routing{
 								RoutingPolicy: []infrav1.RoutingPolicySpec{{
 									Table: ptr.To(uint32(665)),

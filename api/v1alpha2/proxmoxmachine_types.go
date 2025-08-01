@@ -1,5 +1,5 @@
 /*
-Copyright 2023-2024 IONOS Cloud.
+Copyright 2023-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	clusterapierrors "sigs.k8s.io/cluster-api/errors"
+	clusterapierrors "sigs.k8s.io/cluster-api/errors" //nolint:staticcheck
 )
 
 const (

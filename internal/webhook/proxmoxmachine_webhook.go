@@ -1,5 +1,5 @@
 /*
-Copyright 2023-2024 IONOS Cloud.
+Copyright 2023-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,10 +21,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/go-cmp/cmp"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -63,10 +63,19 @@ func (p *ProxmoxMachine) ValidateCreate(_ context.Context, obj runtime.Object) (
 }
 
 // ValidateUpdate implements the update validation function.
-func (p *ProxmoxMachine) ValidateUpdate(_ context.Context, _, newObj runtime.Object) (warnings admission.Warnings, err error) {
+func (p *ProxmoxMachine) ValidateUpdate(_ context.Context, old, newObj runtime.Object) (warnings admission.Warnings, err error) {
 	newMachine, ok := newObj.(*infrav1.ProxmoxMachine)
 	if !ok {
 		return warnings, apierrors.NewBadRequest(fmt.Sprintf("expected a ProxmoxMachine but got %T", newObj))
+	}
+
+	oldMachine, ok := old.(*infrav1.ProxmoxMachine)
+	if !ok {
+		return warnings, apierrors.NewBadRequest(fmt.Sprintf("expected a ProxmoxMachine but got %T", old))
+	}
+	// tags are immutable
+	if !cmp.Equal(newMachine.Spec.Tags, oldMachine.Spec.Tags) {
+		return warnings, apierrors.NewBadRequest("tags are immutable")
 	}
 
 	err = validateNetworks(newMachine)
@@ -90,6 +99,16 @@ func validateNetworks(machine *infrav1.ProxmoxMachine) error {
 
 	gk, name := machine.GroupVersionKind().GroupKind(), machine.GetName()
 
+	if machine.Spec.Network != nil && machine.Spec.Network.Default == nil {
+		return apierrors.NewInvalid(
+			gk,
+			name,
+			field.ErrorList{
+				field.Invalid(
+					field.NewPath("spec", "network", "default"), machine.Spec.Network.Default, "default network device must be set when setting network spec"),
+			})
+	}
+
 	if machine.Spec.Network.Default != nil {
 		err := validateNetworkDeviceMTU(machine.Spec.Network.Default)
 		if err != nil {
@@ -104,7 +123,18 @@ func validateNetworks(machine *infrav1.ProxmoxMachine) error {
 	}
 
 	for i := range machine.Spec.Network.AdditionalDevices {
-		err := validateNetworkDeviceMTU(&machine.Spec.Network.AdditionalDevices[i].NetworkDevice)
+		err := validateIPPoolRef(machine.Spec.Network.AdditionalDevices[i])
+		if err != nil {
+			return apierrors.NewInvalid(
+				gk,
+				name,
+				field.ErrorList{
+					field.Invalid(
+						field.NewPath("spec", "network", "additionalDevices", fmt.Sprint(i), "IPPoolConfig"), machine.Spec.Network.AdditionalDevices[i], err.Error()),
+				})
+		}
+
+		err = validateNetworkDeviceMTU(&machine.Spec.Network.AdditionalDevices[i].NetworkDevice)
 		if err != nil {
 			return apierrors.NewInvalid(
 				gk,
@@ -201,6 +231,14 @@ func validateNetworkDeviceMTU(device *infrav1.NetworkDevice) error {
 		}
 
 		return fmt.Errorf("mtu must be at least 1280 or 1, but was %d", *device.MTU)
+	}
+
+	return nil
+}
+
+func validateIPPoolRef(net infrav1.AdditionalNetworkDevice) error {
+	if net.IPv4PoolRef == nil && net.IPv6PoolRef == nil {
+		return fmt.Errorf("at least one of IPv4PoolRef or IPv6PoolRef must be set")
 	}
 
 	return nil

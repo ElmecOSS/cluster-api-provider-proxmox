@@ -1,5 +1,5 @@
 /*
-Copyright 2023-2024 IONOS Cloud.
+Copyright 2023-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	"sigs.k8s.io/cluster-api/errors"
+	"sigs.k8s.io/cluster-api/errors" //nolint:staticcheck
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -95,6 +95,10 @@ type ClusterSettings struct {
 
 // ProxmoxClusterSpec defines the desired state of a ProxmoxCluster.
 type ProxmoxClusterSpec struct {
+	// Settings contains the cluster settings configuration
+	// +kubebuilder:validation:XValidation:rule="self.mode == '' || self.mode == 'Default' || self.mode == 'SingleInstance' || self.mode == 'MultiInstance'",message="mode must be one of: Default, SingleInstance, MultiInstance"
+	Settings ProxmoxClusterSettings `json:"settings,omitempty"`
+
 	// ControlPlaneEndpoint represents the endpoint used to communicate with the control plane.
 	// +optional
 	// +kubebuilder:validation:XValidation:rule="self.port > 0 && self.port < 65536",message="port must be within 1-65535"
@@ -111,6 +115,8 @@ type ProxmoxClusterSpec struct {
 	// the node which holds the VM template.
 	// +optional
 	AllowedNodes []string `json:"allowedNodes,omitempty"`
+
+	Nodes []string `json:"nodes,omitempty"`
 
 	// SchedulerHints allows to influence the decision on where a VM will be scheduled. For example by applying a multiplicator
 	// to a node's resources, to allow for overprovisioning or to ensure a node will always have a safety buffer.
@@ -284,6 +290,7 @@ type NodeLocation struct {
 	Node string `json:"node"`
 }
 
+// +kubebuilder:storageversion
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=proxmoxclusters,scope=Namespaced,categories=cluster-api,singular=proxmoxcluster

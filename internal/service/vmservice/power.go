@@ -1,5 +1,5 @@
 /*
-Copyright 2023 IONOS Cloud.
+Copyright 2023-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ func reconcilePowerState(ctx context.Context, machineScope *scope.MachineScope) 
 
 	t, err := startVirtualMachine(ctx, machineScope.InfraCluster.ProxmoxClient, machineScope.VirtualMachine)
 	if err != nil {
-		conditions.MarkFalse(machineScope.ProxmoxMachine, infrav1alpha1.VMProvisionedCondition, infrav1alpha1.PoweringOnFailedReason, clusterv1.ConditionSeverityInfo, err.Error())
+		conditions.MarkFalse(machineScope.ProxmoxMachine, infrav1alpha1.VMProvisionedCondition, infrav1alpha1.PoweringOnFailedReason, clusterv1.ConditionSeverityInfo, "%s", err)
 		return false, err
 	}
 

@@ -1,5 +1,5 @@
 /*
-Copyright 2023-2024 IONOS Cloud.
+Copyright 2023-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,16 +27,17 @@ import (
 	"github.com/pkg/errors"
 	"k8s.io/utils/ptr"
 
-	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/cloudinit"
+	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/types"
 )
 
 // Enricher is responsible for enriching the Ignition config with additional data.
 type Enricher struct {
-	BootstrapData []byte
-	Hostname      string
-	InstanceID    string
-	ProviderID    string
-	Network       []cloudinit.NetworkConfigData
+	BootstrapData     []byte
+	Hostname          string
+	InstanceID        string
+	ProviderID        string
+	Network           []types.NetworkConfigData
+	KubernetesVersion string
 }
 
 // Enrich enriches the Ignition config with additional data.
@@ -95,7 +96,7 @@ func (e *Enricher) getEnrichConfig() (*ignitionTypes.Config, error) {
 	}
 
 	// populate networkd units
-	nets, err := RenderNetworkConfigData(cloudinit.BaseCloudInitData{NetworkConfigData: e.Network})
+	nets, err := RenderNetworkConfigData(e.Network)
 	if err != nil {
 		return nil, errors.Wrap(err, "rendering networkd units")
 	}

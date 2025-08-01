@@ -1,5 +1,5 @@
 /*
-Copyright 2023-2024 IONOS Cloud.
+Copyright 2023-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ type Client interface {
 	ConfigureVM(ctx context.Context, vm *proxmox.VirtualMachine, options ...VirtualMachineOption) (*proxmox.Task, error)
 
 	FindVMResource(ctx context.Context, vmID uint64) (*proxmox.ClusterResource, error)
+	FindVMTemplateByTags(ctx context.Context, templateTags []string) (string, int32, error)
 
 	CheckID(ctx context.Context, vmID int64) (bool, error)
 
@@ -41,7 +42,7 @@ type Client interface {
 
 	GetReservableMemoryBytes(ctx context.Context, nodeName string, nodeMemoryAdjustment uint64) (uint64, error)
 
-	ResizeDisk(ctx context.Context, vm *proxmox.VirtualMachine, disk, size string) error
+	ResizeDisk(ctx context.Context, vm *proxmox.VirtualMachine, disk, size string) (*proxmox.Task, error)
 
 	ResumeVM(ctx context.Context, vm *proxmox.VirtualMachine) (*proxmox.Task, error)
 

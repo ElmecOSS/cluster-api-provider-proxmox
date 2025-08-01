@@ -3,56 +3,63 @@ on:
   push:
     branches: ["main"]
   pull_request_target:
-    types: ["opened", "synchronize", "reopened"]
     branches: ["main"]
 
 jobs:
-  go_test:
+  confirm:
+    # check if confirmation is necessary
+    if: github.event_name == 'pull_request_target'
+    # request confirmation
+    environment: e2e
     runs-on: ubuntu-latest
     steps:
-      # If triggered by a push to **our** repository, we can directly checkout the code.
-      - name: Checkout branch ${{ github.ref }}
-        if: ${{ github.event_name == 'push' }}
-        uses: actions/checkout@v4.1.1
-        with:
-          # Disabling shallow clone is recommended for improving relevancy of reporting
-          fetch-depth: 0
+      - run: ":"
 
-      # If triggered by a PR, we have to check out the PR's source
-      - name: Checkout (preview) merge commit for PR ${{ github.event.pull_request.number }}
-        if: ${{ github.event_name == 'pull_request_target' }}
+  test:
+    # check the result of confirmation if necessary
+    # https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#example-not-requiring-successful-dependent-jobs
+    # https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/evaluate-expressions-in-workflows-and-actions#always
+    if: ${{ !cancelled() }}
+    needs: [confirm]
+
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: checkout PR ${{ github.event.pull_request.number }}
+        if: github.event_name == 'pull_request_target'
         uses: actions/checkout@v4.1.1
         with:
-          # Disabling shallow clone is recommended for improving relevancy of reporting
-          fetch-depth: 0
+          fetch-depth: 0 # for SonarQube
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: checkout
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4.1.1
+        with:
+          fetch-depth: 0 # for SonarQube
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
-      - name: Verify
-        run: "make verify"
+      - run: "make verify"
+      - run: "make test"
 
-      - name: Run tests
-        run: "make test"
-
-      - name: SonarCloud Scan ${{ github.ref }}
-        uses: SonarSource/sonarcloud-github-action@v4.0.0
-        if: ${{ github.event_name == 'push' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-      # If triggered by a PR, we have to use the PR's source
-      - name: SonarCloud Scan (preview) merge commit for PR ${{ github.event.pull_request.number }}
-        uses: SonarSource/sonarcloud-github-action@v4.0.0
-        if: ${{ github.event_name == 'pull_request_target' }}
+      - name: SonarQube for PR ${{ github.event.pull_request.number }}
+        if: github.event_name == 'pull_request_target'
+        uses: SonarSource/sonarqube-scan-action@v5.2.0
         with:
          args: >
            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }}
            -Dsonar.scm.revision=${{ github.event.pull_request.head.sha }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: SonarQube
+        if: github.event_name == 'push'
+        uses: SonarSource/sonarqube-scan-action@v5.2.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

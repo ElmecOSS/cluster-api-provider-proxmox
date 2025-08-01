@@ -1,5 +1,5 @@
 /*
-Copyright 2023-2024 IONOS Cloud.
+Copyright 2023-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import (
 	"github.com/luthermonson/go-proxmox"
 	"github.com/pkg/errors"
 	"k8s.io/utils/ptr"
-	capierrors "sigs.k8s.io/cluster-api/errors"
+	capierrors "sigs.k8s.io/cluster-api/errors" //nolint:staticcheck
 	"sigs.k8s.io/cluster-api/util"
 
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/scope"

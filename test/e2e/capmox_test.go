@@ -2,7 +2,7 @@
 // +build e2e
 
 /*
-Copyright 2024 IONOS Cloud.
+Copyright 2024-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -60,19 +60,20 @@ var _ = Describe("Workload cluster creation", func() {
 		result = new(clusterctl.ApplyClusterTemplateAndWaitResult)
 
 		// We need to override clusterctl apply log folder to avoid getting our credentials exposed.
-		clusterctlLogFolder = filepath.Join(os.TempDir(), "clusters", bootstrapClusterProxy.GetName())
+		clusterctlLogFolder = filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName())
 	})
 
 	AfterEach(func() {
 		cleanInput := cleanupInput{
-			SpecName:        specName,
-			Cluster:         result.Cluster,
-			ClusterProxy:    bootstrapClusterProxy,
-			Namespace:       namespace,
-			CancelWatches:   cancelWatches,
-			IntervalsGetter: e2eConfig.GetIntervals,
-			SkipCleanup:     skipCleanup,
-			ArtifactFolder:  artifactFolder,
+			SpecName:             specName,
+			Cluster:              result.Cluster,
+			ClusterProxy:         bootstrapClusterProxy,
+			ClusterctlConfigPath: clusterctlConfigPath,
+			Namespace:            namespace,
+			CancelWatches:        cancelWatches,
+			IntervalsGetter:      e2eConfig.GetIntervals,
+			SkipCleanup:          skipCleanup,
+			ArtifactFolder:       artifactFolder,
 		}
 
 		dumpSpecResourcesAndCleanup(ctx, cleanInput)
@@ -91,7 +92,7 @@ var _ = Describe("Workload cluster creation", func() {
 					Flavor:                   clusterctl.DefaultFlavor,
 					Namespace:                namespace.Name,
 					ClusterName:              clusterName,
-					KubernetesVersion:        e2eConfig.GetVariable(KubernetesVersion),
+					KubernetesVersion:        e2eConfig.MustGetVariable(KubernetesVersion),
 					ControlPlaneMachineCount: pointer.Int64Ptr(1),
 					WorkerMachineCount:       pointer.Int64Ptr(1),
 				},
@@ -111,7 +112,7 @@ var _ = Describe("Workload cluster creation", func() {
 					Flavor:                   clusterctl.DefaultFlavor,
 					Namespace:                namespace.Name,
 					ClusterName:              clusterName,
-					KubernetesVersion:        e2eConfig.GetVariable(KubernetesVersion),
+					KubernetesVersion:        e2eConfig.MustGetVariable(KubernetesVersion),
 					ControlPlaneMachineCount: pointer.Int64Ptr(1),
 					WorkerMachineCount:       pointer.Int64Ptr(3),
 				},
@@ -135,7 +136,7 @@ var _ = Describe("Workload cluster creation", func() {
 					Flavor:                   clusterctl.DefaultFlavor,
 					Namespace:                namespace.Name,
 					ClusterName:              clusterName,
-					KubernetesVersion:        e2eConfig.GetVariable(KubernetesVersion),
+					KubernetesVersion:        e2eConfig.MustGetVariable(KubernetesVersion),
 					ControlPlaneMachineCount: pointer.Int64Ptr(3),
 					WorkerMachineCount:       pointer.Int64Ptr(2),
 				},
@@ -159,7 +160,7 @@ var _ = Describe("Workload cluster creation", func() {
 					Flavor:                   "flatcar",
 					Namespace:                namespace.Name,
 					ClusterName:              clusterName,
-					KubernetesVersion:        e2eConfig.GetVariable(KubernetesVersion),
+					KubernetesVersion:        e2eConfig.MustGetVariable(KubernetesVersion),
 					ControlPlaneMachineCount: pointer.Int64Ptr(3),
 					WorkerMachineCount:       pointer.Int64Ptr(2),
 				},

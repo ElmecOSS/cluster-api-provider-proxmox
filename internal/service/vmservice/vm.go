@@ -1,5 +1,5 @@
 /*
-Copyright 2023-2024 IONOS Cloud.
+Copyright 2023-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,12 +20,13 @@ package vmservice
 import (
 	"context"
 	"slices"
+	"strings"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	capierrors "sigs.k8s.io/cluster-api/errors"
+	capierrors "sigs.k8s.io/cluster-api/errors" //nolint:staticcheck
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/conditions"
 
@@ -42,9 +43,11 @@ const (
 	// See the following link for a list of available config options:
 	// https://pve.proxmox.com/pve-docs/api-viewer/index.html#/nodes/{node}/qemu/{vmid}/config
 
-	optionSockets = "sockets"
-	optionCores   = "cores"
-	optionMemory  = "memory"
+	optionSockets     = "sockets"
+	optionCores       = "cores"
+	optionMemory      = "memory"
+	optionTags        = "tags"
+	optionDescription = "description"
 )
 
 // ErrNoVMIDInRangeFree is returned if no free VMID is found in the specified vmIDRange.
@@ -130,7 +133,7 @@ func checkCloudInitStatus(ctx context.Context, machineScope *scope.MachineScope)
 				return true, nil
 			}
 			if errors.Is(goproxmox.ErrCloudInitFailed, err) {
-				conditions.MarkFalse(machineScope.ProxmoxMachine, infrav1alpha1.VMProvisionedCondition, infrav1alpha1.VMProvisionFailedReason, clusterv1.ConditionSeverityError, err.Error())
+				conditions.MarkFalse(machineScope.ProxmoxMachine, infrav1alpha1.VMProvisionedCondition, infrav1alpha1.VMProvisionFailedReason, clusterv1.ConditionSeverityError, "%s", err)
 				machineScope.SetFailureMessage(err)
 				machineScope.SetFailureReason(capierrors.MachineStatusError("BootstrapFailed"))
 			}
@@ -174,7 +177,7 @@ func ensureVirtualMachine(ctx context.Context, machineScope *scope.MachineScope)
 		// Create the VM.
 		resp, err := createVM(ctx, machineScope)
 		if err != nil {
-			conditions.MarkFalse(machineScope.ProxmoxMachine, infrav1alpha1.VMProvisionedCondition, infrav1alpha1.CloningFailedReason, clusterv1.ConditionSeverityWarning, err.Error())
+			conditions.MarkFalse(machineScope.ProxmoxMachine, infrav1alpha1.VMProvisionedCondition, infrav1alpha1.CloningFailedReason, clusterv1.ConditionSeverityWarning, "%s", err)
 			return false, err
 		}
 		machineScope.Logger.V(4).Info("Task created", "taskID", resp.Task.ID)
@@ -211,7 +214,7 @@ func reconcileDisks(ctx context.Context, machineScope *scope.MachineScope) error
 	}
 
 	if bv := disks.BootVolume; bv != nil {
-		if err := machineScope.InfraCluster.ProxmoxClient.ResizeDisk(ctx, vm, bv.Disk, bv.FormatSize()); err != nil {
+		if _, err := machineScope.InfraCluster.ProxmoxClient.ResizeDisk(ctx, vm, bv.Disk, bv.FormatSize()); err != nil {
 			machineScope.Error(err, "unable to set disk size", "vm", machineScope.VirtualMachine.VMID)
 			return err
 		}
@@ -240,6 +243,13 @@ func reconcileVirtualMachineConfig(ctx context.Context, machineScope *scope.Mach
 		vmOptions = append(vmOptions, proxmox.VirtualMachineOption{Name: optionMemory, Value: value})
 	}
 
+	// Description
+	if machineScope.ProxmoxMachine.Spec.Description != nil {
+		if machineScope.VirtualMachine.VirtualMachineConfig.Description != *machineScope.ProxmoxMachine.Spec.Description {
+			vmOptions = append(vmOptions, proxmox.VirtualMachineOption{Name: optionDescription, Value: machineScope.ProxmoxMachine.Spec.Description})
+		}
+	}
+
 	// Network vmbrs.
 	if machineScope.ProxmoxMachine.Spec.Network != nil && shouldUpdateNetworkDevices(machineScope) {
 		// adding the default network device.
@@ -260,6 +270,20 @@ func reconcileVirtualMachineConfig(ctx context.Context, machineScope *scope.Mach
 				Name:  v.Name,
 				Value: formatNetworkDevice(*v.Model, v.Bridge, v.MTU, v.VLAN),
 			})
+		}
+	}
+
+	// custom tags
+	if machineScope.ProxmoxMachine.Spec.Tags != nil {
+		machineScope.VirtualMachine.SplitTags()
+		length := len(machineScope.VirtualMachine.VirtualMachineConfig.TagsSlice)
+		for _, tag := range machineScope.ProxmoxMachine.Spec.Tags {
+			if !machineScope.VirtualMachine.HasTag(tag) {
+				machineScope.VirtualMachine.VirtualMachineConfig.TagsSlice = append(machineScope.VirtualMachine.VirtualMachineConfig.TagsSlice, tag)
+			}
+		}
+		if len(machineScope.VirtualMachine.VirtualMachineConfig.TagsSlice) > length {
+			vmOptions = append(vmOptions, proxmox.VirtualMachineOption{Name: optionTags, Value: strings.Join(machineScope.VirtualMachine.VirtualMachineConfig.TagsSlice, ";")})
 		}
 	}
 
@@ -368,9 +392,10 @@ func createVM(ctx context.Context, scope *scope.MachineScope) (proxmox.VMCloneRe
 		scope.InfraCluster.ProxmoxCluster.Status.NodeLocations = new(infrav1alpha1.NodeLocations)
 	}
 
-	// if no target was specified but we have a set of nodes defined in the cluster spec, we want to evenly distribute
+	// if no target was specified but we have a set of nodes defined in the spec, we want to evenly distribute
 	// the nodes across the cluster.
-	if scope.ProxmoxMachine.Spec.Target == nil && len(scope.InfraCluster.ProxmoxCluster.Spec.AllowedNodes) > 0 {
+	if scope.ProxmoxMachine.Spec.Target == nil &&
+		(len(scope.InfraCluster.ProxmoxCluster.Spec.AllowedNodes) > 0 || len(scope.ProxmoxMachine.Spec.AllowedNodes) > 0) {
 		// select next node as a target
 		var err error
 		options.Target, err = selectNextNode(ctx, scope)
@@ -384,6 +409,20 @@ func createVM(ctx context.Context, scope *scope.MachineScope) (proxmox.VMCloneRe
 	}
 
 	templateID := scope.ProxmoxMachine.GetTemplateID()
+	if templateID == -1 {
+		var err error
+		templateSelectorTags := scope.ProxmoxMachine.GetTemplateSelectorTags()
+		options.Node, templateID, err = scope.InfraCluster.ProxmoxClient.FindVMTemplateByTags(ctx, templateSelectorTags)
+
+		if err != nil {
+			if errors.Is(err, goproxmox.ErrTemplateNotFound) {
+				scope.SetFailureMessage(err)
+				scope.SetFailureReason(capierrors.MachineStatusError("VMTemplateNotFound"))
+				conditions.MarkFalse(scope.ProxmoxMachine, infrav1alpha1.VMProvisionedCondition, infrav1alpha1.VMProvisionFailedReason, clusterv1.ConditionSeverityError, "%s", err)
+			}
+			return proxmox.VMCloneResponse{}, err
+		}
+	}
 	res, err := scope.InfraCluster.ProxmoxClient.CloneVM(ctx, int(templateID), options)
 	if err != nil {
 		return res, err

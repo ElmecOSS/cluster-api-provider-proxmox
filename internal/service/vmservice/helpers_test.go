@@ -1,5 +1,5 @@
 /*
-Copyright 2023-2024 IONOS Cloud.
+Copyright 2023-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -38,6 +38,8 @@ import (
 
 	infrav1alpha1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha1"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/internal/inject"
+	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/cloudinit"
+	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/ignition"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/kubernetes/ipam"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox/proxmoxtest"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/scope"
@@ -48,6 +50,14 @@ type FakeISOInjector struct {
 }
 
 func (f FakeISOInjector) Inject(_ context.Context, _ inject.BootstrapDataFormat) error {
+	return f.Error
+}
+
+type FakeIgnitionISOInjector struct {
+	Error error
+}
+
+func (f FakeIgnitionISOInjector) Inject(_ context.Context, _ inject.BootstrapDataFormat) error {
 	return f.Error
 }
 
@@ -99,8 +109,10 @@ func setupReconcilerTest(t *testing.T) (*scope.MachineScope, *proxmoxtest.MockCl
 		},
 		Spec: infrav1alpha1.ProxmoxMachineSpec{
 			VirtualMachineCloneSpec: infrav1alpha1.VirtualMachineCloneSpec{
-				SourceNode: "node1",
-				TemplateID: ptr.To[int32](123),
+				TemplateSource: infrav1alpha1.TemplateSource{
+					SourceNode: "node1",
+					TemplateID: ptr.To[int32](123),
+				},
 			},
 		},
 	}
@@ -209,17 +221,27 @@ func createIPPools(t *testing.T, c client.Client, machineScope *scope.MachineSco
 	}
 }
 
-func createBootstrapSecret(t *testing.T, c client.Client, machineScope *scope.MachineScope) {
+func createBootstrapSecret(t *testing.T, c client.Client, machineScope *scope.MachineScope, format string) {
 	machineScope.Machine.Spec.Bootstrap.DataSecretName = ptr.To(machineScope.Name())
+	data := map[string][]byte{}
+	switch format {
+	case cloudinit.FormatCloudConfig:
+		data = map[string][]byte{
+			"value":  []byte("data"),
+			"format": []byte("cloud-config"),
+		}
+	case ignition.FormatIgnition:
+		data = map[string][]byte{
+			"value":  []byte("{\"ignition\":{\"version\":\"2.3.0\"}}"),
+			"format": []byte("ignition"),
+		}
+	}
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      machineScope.Name(),
 			Namespace: machineScope.Namespace(),
 		},
-		Data: map[string][]byte{
-			"value":  []byte("data"),
-			"format": []byte("cloud-config"),
-		},
+		Data: data,
 	}
 	require.NoError(t, c.Create(context.Background(), secret))
 }

@@ -1,5 +1,5 @@
 /*
-Copyright 2023-2024 IONOS Cloud.
+Copyright 2023-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -231,7 +231,7 @@ func (h *Helper) CreateIPAddressClaim(ctx context.Context, owner client.Object, 
 	}
 
 	switch {
-	case device == infrav1.DefaultNetworkDevice:
+	case device == infrav1.DefaultNetworkDevice && ref == nil:
 		pool, err := h.GetDefaultInClusterIPPool(ctx, format)
 		if err != nil {
 			return errors.Wrapf(err, "unable to find inclusterpool for cluster %s", h.cluster.Name)

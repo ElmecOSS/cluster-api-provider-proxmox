@@ -73,7 +73,7 @@ Metrics are, like all network configuration, part of bootstrap, and will not rec
 ```bash
 clusterctl generate cluster test-multiple-vlans  \
   --infrastructure proxmox \
-  --kubernetes-version v1.30.6  \
+  --kubernetes-version v1.31.6  \
   --control-plane-machine-count=1 \
   --worker-machine-count=2 \
   --flavor=multiple-vlans > cluster.yaml
@@ -106,7 +106,7 @@ If you're using cilium, be aware that Cilium's helm chart requires `ipv6.enabled
 ```bash
 clusterctl generate cluster test-duacl-stack  \
   --infrastructure proxmox \
-  --kubernetes-version v1.30.6  \
+  --kubernetes-version v1.31.6  \
   --control-plane-machine-count=1 \
   --worker-machine-count=2 \
   --flavor=dual-stack > cluster.yaml
@@ -162,7 +162,7 @@ METALLB_IPV6_RANGE:
 ```bash
 clusterctl generate cluster test-bgp-lb  \
   --infrastructure proxmox \
-  --kubernetes-version v1.30.6  \
+  --kubernetes-version v1.31.6  \
   --control-plane-machine-count=1 \
   --worker-machine-count=2 \
   --flavor=cilium-load-balancer > cluster.yaml
@@ -175,6 +175,14 @@ By default our scheduler only allows to allocate as much memory to guests as the
 This behaviour can be configured in the `ProxmoxCluster` CR through the field `.spec.schedulerHints.memoryAdjustment`.
 
 For example, setting it to `0` (zero), entirely disables scheduling based on memory. Alternatively, if you set it to any value greater than `0`, the scheduler will treat your host as it would have `${value}%` of memory. In real numbers that would mean, if you have a host with 64GB of memory and set the number to `300`, the scheduler would allow you to provision guests with a total of 192GB memory and therefore overprovision the host. (Use with caution! It's strongly suggested to have memory ballooning configured everywhere.). Or, if you were to set it to `95` for example, it would treat your host as it would only have 60,8GB of memory, and leave the remaining 3,2GB for the host.
+
+## Template lookup based on Proxmox tags
+
+Our provider is able to look up templates based on their attached tags, for `ProxmoxMachine` resources, that make use of an tag selector.
+
+For example, you can set the `TEMPLATE_TAGS="tag1,tag2"` environment variable. Your custom image will then be used when using the [auto-image](https://github.com/ionos-cloud/cluster-api-provider-ionoscloud/blob/main/templates/cluster-template-auto-image.yaml) template.
+
+Please note: Passed tags must be an exact 1:1 match with the tags on the template you want to use.  The matched result must be unique. If multiple templates are found, provisioning will fail.
 
 ## Proxmox RBAC with least privileges
 
@@ -202,6 +210,103 @@ For the Proxmox API user/token you create for CAPMOX, these are the minimum requ
 * In the SDN example, `1234` is the optional VLAN ID if you want to restrict the user to a specific VLAN.
 * CAPMOX needs `PVEDataStoreAdmin` on a storage suitable for ISO images for cloud-init. Create a dedicated storage for this (you can use subdirectories in an existing network share for example).
 * CAPMOX needs `AllocateSpace` permissions on a storage suitable for disc images. This can be shared with other users as it is only accessed indirectly by cloning/deleting VMs.
+
+## Proxmox TLS communication
+
+The default behavior of the Proxmox API is to skip TLS verification when communicating with the Proxmox API,
+The `PROXMOX_INSECURE` environment variable is set to `true` by default in the CAPMOX manager, to skip the verification of the TLS certificate with the Proxmox API.
+```
+containers:
+  - name: manager
+    args:
+    - --leader-elect
+    - --feature-gates=ClusterTopology=true
+    - "--metrics-bind-address=localhost:8080"
+    - "--v=0"
+    env:
+    - name: PROXMOX_INSECURE
+      value: "true"
+```
+
+If you want to use a certificate for communication with the Proxmox API, you can set the `proxmox-root-cert-file` flag variable to the path of the certificate file, and
+set the `PROXMOX_INSECURE` environment variable to `false`.
+
+```yaml
+containers:
+  - name: manager
+    args:
+    - --leader-elect
+    - --feature-gates=ClusterTopology=true
+    - "--metrics-bind-address=localhost:8080"
+    - "--v=0"
+    - "--proxmox-root-cert-file=/var/lib/proxmox/certs/root-ca.pem"
+    env:
+    - name: PROXMOX_INSECURE
+      value: "false"  
+    volumeMounts:
+    - name: proxmox-root-cert
+      mountPath: /var/lib/proxmox/certs
+      readOnly: true
+
+volumes:
+  - name: proxmox-root-cert
+    secret:
+      secretName: proxmox-root-cert
+
+```
+
+
+## Custom Allowed Nodes for ProxmoxMachine
+
+Previously, the Proxmox nodes that will host the Machines are defined in `ProxmoxCluster.spec.allowedNodes`, that config restrict us from placing some set of machines into some specific nodes.
+Now, you can also define and override the `allowedNodes` in the ProxmoxMachine, to do so:
+
+```diff
+kind: ProxmoxMachineTemplate
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+metadata:
+  name: "test-control-plane"
+spec:
+  template:
+    spec:
+       sourceNode: "pve"
+       templateID: 1000
+       format: "qcow2"
+       full: true
++      allowedNodes: ["pve-1", "pve-3", "pve-4"]
+```
+
+With the following config, you can override what has been set in the Proxmox Cluster, and also you have more flexibility for example you can have a custom allowed Nodes per Machine Deployments.
+
+## Custom Default Network IP Pool for ProxmoxMachine
+
+Like the Allowed Nodes, in the past we couldn't set a custom IP Pool for the default network device, everything was tied to the ProxmoxCluster IP Config.
+Now, you can also customize the IP Pool for the default network device, just by setting the `ipv4PoolRef` and/or `ipv6PoolRef`.
+
+```diff
+kind: ProxmoxMachineTemplate
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+metadata:
+  name: "test-control-plane"
+spec:
+  template:
+    spec:
+     sourceNode: "pve"
+     templateID: 1000
+     format: "qcow2"
+     full: true
+     network:
+       default:
+         bridge: ${BRIDGE}
+         model: virtio
++        ipv4PoolRef:
++          apiGroup: ipam.cluster.x-k8s.io
++          kind: GlobalInClusterIPPool
++          name: shared-inclusterippool
+```
+
+You can set either `ipv4PoolRef` or `ipv6PoolRef` or you can also set them both for dual-stack.
+It's up for you also to manage the IP Pool, you can choose a `GlobalInClusterIPPool` or an `InClusterIPPool`.
 
 ## Notes
 

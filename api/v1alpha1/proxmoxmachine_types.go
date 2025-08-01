@@ -1,5 +1,5 @@
 /*
-Copyright 2023-2024 IONOS Cloud.
+Copyright 2023-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	clusterapierrors "sigs.k8s.io/cluster-api/errors"
+	clusterapierrors "sigs.k8s.io/cluster-api/errors" //nolint:staticcheck
 )
 
 const (
@@ -113,6 +113,24 @@ type ProxmoxMachineSpec struct {
 	// MetadataSettings defines the metadata settings for this machine's VM.
 	// +optional
 	MetadataSettings *MetadataSettings `json:"metadataSettings,omitempty"`
+
+	// AllowedNodes specifies all Proxmox nodes which will be considered
+	// for operations. This implies that VMs can be cloned on different nodes from
+	// the node which holds the VM template.
+	//
+	// This field is optional and should only be set if you want to restrict
+	// the nodes where the VM can be cloned.
+	// If not set, the ProxmoxCluster will be used to determine the nodes.
+	// +optional
+	AllowedNodes []string `json:"allowedNodes,omitempty"`
+
+	// Tags is a list of tags to be applied to the virtual machine.
+	// +optional
+	// +immutable
+	// +listType=set
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:Pattern=`^(?i)[a-z0-9_][a-z0-9_\-\+\.]*$`
+	Tags []string `json:"tags,omitempty"`
 }
 
 // Storage is the physical storage on the node.
@@ -155,8 +173,8 @@ const (
 	TargetStorageFormatVmdk  TargetFileStorageFormat = "vmdk"
 )
 
-// VirtualMachineCloneSpec is information used to clone a virtual machine.
-type VirtualMachineCloneSpec struct {
+// TemplateSource defines the source of the template VM.
+type TemplateSource struct {
 	// SourceNode is the initially selected proxmox node.
 	// This node will be used to locate the template VM, which will
 	// be used for cloning operations.
@@ -173,11 +191,23 @@ type VirtualMachineCloneSpec struct {
 	// will be cloned onto the same node as SourceNode.
 	//
 	// +kubebuilder:validation:MinLength=1
-	SourceNode string `json:"sourceNode"`
+	// +optional
+	SourceNode string `json:"sourceNode,omitempty"`
 
 	// TemplateID the vm_template vmid used for cloning a new VM.
 	// +optional
 	TemplateID *int32 `json:"templateID,omitempty"`
+
+	// TemplateSelector defines MatchTags for looking up VM templates.
+	// +optional
+	TemplateSelector *TemplateSelector `json:"templateSelector,omitempty"`
+}
+
+// VirtualMachineCloneSpec is information used to clone a virtual machine.
+// +kubebuilder:validation:XValidation:rule="self.full || !has(self.format)",message="Must set full=true when specifying format"
+// +kubebuilder:validation:XValidation:rule="self.full || !has(self.storage)",message="Must set full=true when specifying storage"
+type VirtualMachineCloneSpec struct {
+	TemplateSource `json:",inline"`
 
 	// Description for the new VM.
 	// +optional
@@ -185,7 +215,6 @@ type VirtualMachineCloneSpec struct {
 
 	// Format for file storage. Only valid for full clone.
 	// +kubebuilder:validation:Enum=raw;qcow2;vmdk
-	// +kubebuilder:default=raw
 	// +optional
 	Format *TargetFileStorageFormat `json:"format,omitempty"`
 
@@ -213,6 +242,18 @@ type VirtualMachineCloneSpec struct {
 	Target *string `json:"target,omitempty"`
 }
 
+// TemplateSelector defines MatchTags for looking up VM templates.
+type TemplateSelector struct {
+	// Specifies all tags to look for, when looking up the VM template.
+	// Passed tags must be an exact 1:1 match with the tags on the template you want to use.
+	// If multiple VM templates with the same set of tags are found, provisioning will fail.
+	//
+	// +listType=set
+	// +kubebuilder:validation:items:Pattern=`^(?i)[a-z0-9_][a-z0-9_\-\+\.]*$`
+	// +kubebuilder:validation:MinItems=1
+	MatchTags []string `json:"matchTags"`
+}
+
 // NetworkSpec defines the virtual machine's network configuration.
 type NetworkSpec struct {
 	// Default is the default network device,
@@ -231,8 +272,8 @@ type NetworkSpec struct {
 	VirtualNetworkDevices `json:",inline"`
 }
 
-// InterfaceConfig contains all configurables a network interface can have.
-type InterfaceConfig struct {
+// IPPoolConfig defines the IPAM pool ref.
+type IPPoolConfig struct {
 	// IPv4PoolRef is a reference to an IPAM Pool resource, which exposes IPv4 addresses.
 	// The network device will use an available IP address from the referenced pool.
 	// This can be combined with `IPv6PoolRef` in order to enable dual stack.
@@ -248,13 +289,10 @@ type InterfaceConfig struct {
 	// +kubebuilder:validation:XValidation:rule="self.apiGroup == 'ipam.cluster.x-k8s.io'",message="ipv6PoolRef allows only IPAM apiGroup ipam.cluster.x-k8s.io"
 	// +kubebuilder:validation:XValidation:rule="self.kind == 'InClusterIPPool' || self.kind == 'GlobalInClusterIPPool'",message="ipv6PoolRef allows either InClusterIPPool or GlobalInClusterIPPool"
 	IPv6PoolRef *corev1.TypedLocalObjectReference `json:"ipv6PoolRef,omitempty"`
+}
 
-	// DNSServers contains information about nameservers to be used for this interface.
-	// If this field is not set, it will use the default dns servers from the ProxmoxCluster.
-	// +optional
-	// +kubebuilder:validation:MinItems=1
-	DNSServers []string `json:"dnsServers,omitempty"`
-
+// InterfaceConfig contains all configurables a network interface can have.
+type InterfaceConfig struct {
 	// Routing is the common spec of routes and routing policies to all interfaces and VRFs.
 	Routing `json:",inline"`
 
@@ -364,6 +402,19 @@ type NetworkDevice struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=4094
 	VLAN *uint16 `json:"vlan,omitempty"`
+
+	// DNSServers contains information about nameservers to be used for this interface.
+	// If this field is not set, it will use the default dns servers from the ProxmoxCluster.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	DNSServers []string `json:"dnsServers,omitempty"`
+
+	// IPPoolConfig defines config for IP Pool ref.
+	// For default device 'net0' the IP pool is optional,
+	// If not set, the default IPAM pool will be used.
+	// For additional devices, the IP pool is required (IPV4/IPV6).
+	// +optional
+	IPPoolConfig `json:",inline"`
 }
 
 // MTU is the network device Maximum Transmission Unit. MTUs below 1280 break IPv6.
@@ -525,7 +576,8 @@ type ProxmoxMachine struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// +kubebuilder:validation:XValidation:rule="self.full && self.format != ''",message="Must set full=true when specifying format"
+	// +kubebuilder:validation:XValidation:rule="[has(self.sourceNode), has(self.templateSelector)].exists_one(c, c)",message="must define either SourceNode with TemplateID, OR TemplateSelector"
+	// +kubebuilder:validation:XValidation:rule="[has(self.templateID), has(self.templateSelector)].exists_one(c, c)",message="must define either SourceNode with TemplateID, OR TemplateSelector."
 	Spec   ProxmoxMachineSpec   `json:"spec,omitempty"`
 	Status ProxmoxMachineStatus `json:"status,omitempty"`
 }
@@ -563,6 +615,14 @@ func (r *ProxmoxMachine) GetTemplateID() int32 {
 		return *r.Spec.TemplateID
 	}
 	return -1
+}
+
+// GetTemplateSelectorTags get the tags, the desired vm template should have.
+func (r *ProxmoxMachine) GetTemplateSelectorTags() []string {
+	if r.Spec.TemplateSelector != nil {
+		return r.Spec.TemplateSelector.MatchTags
+	}
+	return nil
 }
 
 // GetNode get the Proxmox node used to provision this machine.

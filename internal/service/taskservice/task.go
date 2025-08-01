@@ -1,5 +1,5 @@
 /*
-Copyright 2023 IONOS Cloud.
+Copyright 2023-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -117,8 +117,10 @@ func checkAndRetryTask(scope *scope.MachineScope, task *proxmox.Task) (bool, err
 
 		if task.ExitStatus != "OK" {
 			errorMessage = task.ExitStatus
+		} else {
+			errorMessage = "task failed but its exit status is OK; this should not happen"
 		}
-		conditions.MarkFalse(scope.ProxmoxMachine, infrav1alpha1.VMProvisionedCondition, infrav1alpha1.TaskFailure, clusterv1.ConditionSeverityInfo, errorMessage)
+		conditions.MarkFalse(scope.ProxmoxMachine, infrav1alpha1.VMProvisionedCondition, infrav1alpha1.TaskFailure, clusterv1.ConditionSeverityInfo, "%s", errorMessage)
 
 		// Instead of directly requeuing the failed task, wait for the RetryAfter duration to pass
 		// before resetting the taskRef from the ProxmoxMachine status.

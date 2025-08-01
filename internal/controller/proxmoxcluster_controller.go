@@ -1,5 +1,5 @@
 /*
-Copyright 2023-2024 IONOS Cloud.
+Copyright 2023-2025 IONOS Cloud.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	clustererrors "sigs.k8s.io/cluster-api/errors"
+	clustererrors "sigs.k8s.io/cluster-api/errors" //nolint:staticcheck
 	clusterutil "sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
 	"sigs.k8s.io/cluster-api/util/conditions"
@@ -68,11 +68,11 @@ type ProxmoxClusterReconciler struct {
 func (r *ProxmoxClusterReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrav1alpha1.ProxmoxCluster{}).
-		WithEventFilter(predicates.ResourceNotPaused(ctrl.LoggerFrom(ctx))).
+		WithEventFilter(predicates.ResourceNotPaused(r.Scheme, ctrl.LoggerFrom(ctx))).
 		Watches(&clusterv1.Cluster{},
 			handler.EnqueueRequestsFromMapFunc(clusterutil.ClusterToInfrastructureMapFunc(ctx, infrav1alpha1.GroupVersion.WithKind(infrav1alpha1.ProxmoxClusterKind), mgr.GetClient(), &infrav1alpha1.ProxmoxCluster{})),
-			builder.WithPredicates(predicates.ClusterUnpaused(ctrl.LoggerFrom(ctx)))).
-		WithEventFilter(predicates.ResourceIsNotExternallyManaged(ctrl.LoggerFrom(ctx))).
+			builder.WithPredicates(predicates.ClusterUnpaused(r.Scheme, ctrl.LoggerFrom(ctx)))).
+		WithEventFilter(predicates.ResourceIsNotExternallyManaged(r.Scheme, ctrl.LoggerFrom(ctx))).
 		Complete(r)
 }
 
@@ -81,7 +81,7 @@ func (r *ProxmoxClusterReconciler) SetupWithManager(ctx context.Context, mgr ctr
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=proxmoxclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=proxmoxclusters/finalizers,verbs=update
 
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch;patch
 
 // +kubebuilder:rbac:groups=ipam.cluster.x-k8s.io,resources=inclusterippools,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=ipam.cluster.x-k8s.io,resources=globalinclusterippools,verbs=get;list;watch;create;update;patch;delete
@@ -218,7 +218,7 @@ func (r *ProxmoxClusterReconciler) reconcileNormal(ctx context.Context, clusterS
 	// when a Cluster is marked failed cause the Proxmox client is nil.
 	// the cluster doesn't reconcile the failed state if we restart the controller.
 	// so we need to check if the ProxmoxClient is not nil and the ProxmoxCluster has a failure reason.
-	err := r.reconcileFailedClusterState(clusterScope)
+	err := r.reconcileFailedClusterState(ctx, clusterScope)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -233,7 +233,7 @@ func (r *ProxmoxClusterReconciler) reconcileNormal(ctx context.Context, clusterS
 	}
 
 	if err := r.reconcileNormalCredentialsSecret(ctx, clusterScope); err != nil {
-		conditions.MarkFalse(clusterScope.ProxmoxCluster, infrav1alpha1.ProxmoxClusterReady, infrav1alpha1.ProxmoxUnreachableReason, clusterv1.ConditionSeverityError, err.Error())
+		conditions.MarkFalse(clusterScope.ProxmoxCluster, infrav1alpha1.ProxmoxClusterReady, infrav1alpha1.ProxmoxUnreachableReason, clusterv1.ConditionSeverityError, "%s", err)
 		if apierrors.IsNotFound(err) {
 			clusterScope.ProxmoxCluster.Status.FailureMessage = ptr.To("credentials secret not found")
 			clusterScope.ProxmoxCluster.Status.FailureReason = ptr.To(clustererrors.InvalidConfigurationClusterError)
@@ -248,28 +248,27 @@ func (r *ProxmoxClusterReconciler) reconcileNormal(ctx context.Context, clusterS
 	return ctrl.Result{}, nil
 }
 
-func (r *ProxmoxClusterReconciler) reconcileFailedClusterState(clusterScope *scope.ClusterScope) error {
+func (r *ProxmoxClusterReconciler) reconcileFailedClusterState(ctx context.Context, clusterScope *scope.ClusterScope) error {
 	if clusterScope.ProxmoxClient != nil &&
-		clusterScope.ProxmoxCluster.Status.FailureReason != nil &&
-		clusterScope.ProxmoxCluster.Status.FailureMessage != nil &&
-		ptr.Deref(clusterScope.ProxmoxCluster.Status.FailureReason, "") == clustererrors.InvalidConfigurationClusterError &&
-		strings.Contains(ptr.Deref(clusterScope.ProxmoxCluster.Status.FailureMessage, ""), "No credentials found") {
-		// clear the failure reason
+		ptr.Deref(clusterScope.Cluster.Status.FailureReason, "") == clustererrors.InvalidConfigurationClusterError &&
+		strings.Contains(ptr.Deref(clusterScope.Cluster.Status.FailureMessage, ""), "No credentials found") {
+		// Clear the failure reason and patch the proxmox cluster.
 		clusterScope.ProxmoxCluster.Status.FailureMessage = nil
 		clusterScope.ProxmoxCluster.Status.FailureReason = nil
-		if err := clusterScope.Close(); err != nil {
+		if err := clusterScope.PatchObject(); err != nil {
 			return err
 		}
 
-		cHelper, err := patch.NewHelper(clusterScope.Cluster, r.Client)
+		// Clear the failure reason and patch the root cluster.
+		newCluster := clusterScope.Cluster.DeepCopy()
+		newCluster.Status.FailureMessage = nil
+		newCluster.Status.FailureReason = nil
+
+		err := r.Status().Patch(ctx, newCluster, client.MergeFrom(clusterScope.Cluster))
 		if err != nil {
-			return errors.Wrap(err, "failed to init patch helper")
+			return errors.Wrapf(err, "failed to patch cluster %s/%s", newCluster.Namespace, newCluster.Name)
 		}
-		clusterScope.Cluster.Status.FailureMessage = nil
-		clusterScope.Cluster.Status.FailureReason = nil
-		if err = cHelper.Patch(context.TODO(), clusterScope.Cluster); err != nil {
-			return err
-		}
+
 		return errors.New("reconciling cluster failure state")
 	}
 
