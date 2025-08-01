@@ -13,6 +13,10 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
+
+API_DIR := api
+APIS := v1alpha1 v1alpha2
+MODULE := github.com/ionos-cloud/cluster-api-provider-proxmox
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
 SHELL = /usr/bin/env bash -o pipefail
@@ -47,6 +51,15 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object paths="./..."
+
+.PHONY: generate-conversions
+## Generate conversion functions between API versions
+generate-conversions:
+	$(CONVERSION_GEN) \
+		-v 100 \
+		--output-file=zz_generated.conversion.go \
+		--go-header-file=hack/boilerplate.go.txt \
+		./api/v1alpha1
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -166,7 +179,6 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
-##@ Build Dependencies
 
 ## Location to install dependencies to
 LOCALBIN ?= $(shell pwd)/bin
@@ -176,6 +188,7 @@ $(LOCALBIN):
 ## Tool Binaries
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
+CONVERSION_GEN := $(LOCALBIN)/conversion-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 
 ## Tool Versions

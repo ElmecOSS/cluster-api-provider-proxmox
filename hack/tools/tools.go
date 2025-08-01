@@ -25,4 +25,5 @@ import (
 	_ "github.com/google/yamlfmt"
 	_ "github.com/vektra/mockery/v2"
 	_ "golang.org/x/tools/cmd/goimports"
+	_ "k8s.io/code-generator/cmd/conversion-gen"
 )

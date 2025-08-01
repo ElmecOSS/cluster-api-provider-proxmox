@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha2
 
 import (
 	corev1 "k8s.io/api/core/v1"
@@ -31,9 +31,67 @@ const (
 	// ClusterFinalizer allows cleaning up resources associated with a
 	// ProxmoxCluster before removing it from the apiserver.
 	ClusterFinalizer = "proxmoxcluster.infrastructure.cluster.x-k8s.io"
-	// SecretFinalizer is the finalizer for ProxmoxCluster credentials secrets.
+	// SecretFinalizer is the finalizer for ProxmoxCluster credentials secrets .
 	SecretFinalizer = "proxmoxcluster.infrastructure.cluster.x-k8s.io/secret" //nolint:gosec
 )
+
+type ProvisioningMode string
+
+const (
+	// DefaultMode provisions the cluster on a single default Proxmox cluster
+	DefaultMode ProvisioningMode = "Default"
+	// SingleInstanceMode provisions the cluster on a single randomly chosen Proxmox cluster
+	SingleInstanceMode ProvisioningMode = "SingleInstance"
+	// MultiInstanceMode provisions the cluster across multiple Proxmox clusters
+	MultiInstanceMode ProvisioningMode = "MultiInstance"
+)
+
+type ProxmoxInstance struct {
+	// Name is the identifier for this Proxmox cluster instance
+	Name string `json:"name"`
+
+	// Nodes are the Proxmox nodes available in this cluster
+	Nodes []string `json:"nodes"`
+
+	// Template contains the VM template configuration
+	Template TemplateSpec `json:"template"`
+
+	// CredentialsRef is a reference to the Secret containing credentials for this Proxmox cluster
+	CredentialsRef corev1.LocalObjectReference `json:"credentialsRef"`
+}
+
+// TemplateSpec defines the template configuration for VM cloning
+type TemplateSpec struct {
+	// SourceNode is the node containing the template
+	// +optional
+	SourceNode string `json:"sourceNode,omitempty"`
+
+	// TemplateID is the ID of the template VM
+	// +optional
+	TemplateID int32 `json:"templateID,omitempty"`
+
+	// TemplateSelector allows selecting a template based on tags
+	// +optional
+	TemplateSelector *TemplateSelector `json:"templateSelector,omitempty"`
+}
+
+// TemplateSelector allows selecting a template based on tags
+type TemplateSelector struct {
+	// MatchTags are the tags that should be present on the template
+	MatchTags []string `json:"matchTags"`
+}
+
+// ClusterSettings contains the configuration for multi-cluster provisioning
+type ClusterSettings struct {
+	// Mode specifies the provisioning mode for the cluster
+	// +optional
+	// +kubebuilder:default=Default
+	Mode ProvisioningMode `json:"mode,omitempty"`
+
+	// Instances contains the list of Proxmox cluster instances
+	// +optional
+	Instances []ProxmoxInstance `json:"instances,omitempty"`
+}
 
 // ProxmoxClusterSpec defines the desired state of a ProxmoxCluster.
 type ProxmoxClusterSpec struct {
@@ -41,6 +99,8 @@ type ProxmoxClusterSpec struct {
 	// +optional
 	// +kubebuilder:validation:XValidation:rule="self.port > 0 && self.port < 65536",message="port must be within 1-65535"
 	ControlPlaneEndpoint *clusterv1.APIEndpoint `json:"controlPlaneEndpoint"`
+
+	Settings *ClusterSettings `json:"settings,omitempty"`
 
 	// ExternalManagedControlPlane can be enabled to allow externally managed Control Planes to patch the
 	// Proxmox cluster with the Load Balancer IP provided by Control Plane provider.
@@ -226,11 +286,12 @@ type NodeLocation struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:conversion-gen
 // +kubebuilder:resource:path=proxmoxclusters,scope=Namespaced,categories=cluster-api,singular=proxmoxcluster
 // +kubebuilder:printcolumn:name="Cluster",type="string",JSONPath=".metadata.labels['cluster\\.x-k8s\\.io/cluster-name']",description="Cluster"
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.ready",description="Cluster infrastructure is ready"
 // +kubebuilder:printcolumn:name="Endpoint",type="string",JSONPath=".spec.controlPlaneEndpoint",description="API Endpoint"
+// +kubebuilder:storageversion
+// +k8s:conversion-gen=true
 
 // ProxmoxCluster is the Schema for the proxmoxclusters API.
 type ProxmoxCluster struct {

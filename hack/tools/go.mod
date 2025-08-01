@@ -8,6 +8,7 @@ require (
 	github.com/google/yamlfmt v0.11.0
 	github.com/vektra/mockery/v2 v2.34.2
 	golang.org/x/tools v0.19.0
+	k8s.io/code-generator v0.29.0
 )
 
 require (

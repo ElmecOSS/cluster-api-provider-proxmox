@@ -14,12 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package v1alpha1 contains API Schema definitions for the infrastructure v1alpha1 API group
+// Package v1alpha2 contains API Schema definitions for the infrastructure v1alpha1 API group
 // +kubebuilder:object:generate=true
 // +groupName=infrastructure.cluster.x-k8s.io
-// +kubebuilder:conversion-gen=https://github.com/ionos-cloud/cluster-api-provider-proxmox/v1alpha2
+// +kubebuilder:conversion-gen=https://github.com/ionos-cloud/cluster-api-provider-proxmox/v1alpha1
 
-package v1alpha1
+package v1alpha2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,7 +29,7 @@ import (
 
 var (
 	// GroupVersion is group version used to register these objects.
-	GroupVersion = schema.GroupVersion{Group: "infrastructure.cluster.x-k8s.io", Version: "v1alpha1"}
+	GroupVersion = schema.GroupVersion{Group: "infrastructure.cluster.x-k8s.io", Version: "v1alpha2"}
 
 	// localschemeBuilder is used to add go types to the GroupVersionKind scheme.
 	localSchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
