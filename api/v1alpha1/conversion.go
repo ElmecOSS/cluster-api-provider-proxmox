@@ -8,14 +8,14 @@ import (
 )
 
 // ConvertTo converts this ProxmoxCluster (v1alpha1) to the Hub version (v1alpha2).
-func (src *ProxmoxCluster) ConvertTo(dstRaw conversion.Hub) error {
+func (c *ProxmoxCluster) ConvertTo(dstRaw conversion.Hub) error {
 	dst := dstRaw.(*v1alpha2.ProxmoxCluster)
 	fmt.Println(dst)
 	return nil
 }
 
-// ConvertFrom converts the Hub version (v1alpha2) to this ProxmoCluster (v1alpha1).
-func (dst *ProxmoxCluster) ConvertFrom(srcRaw conversion.Hub) error {
+// ConvertFrom converts the Hub version (v1alpha2) to this ProxmoxCluster (v1alpha1).
+func (c *ProxmoxCluster) ConvertFrom(srcRaw conversion.Hub) error {
 	src := srcRaw.(*v1alpha2.ProxmoxCluster)
 	fmt.Println(src)
 	return nil
@@ -26,6 +26,8 @@ func Convert_v1alpha2_ProxmoxClusterSpec_To_v1alpha1_ProxmoxClusterSpec(in *v1al
 	out.DNSServers = in.DNSServers
 	out.ControlPlaneEndpoint = in.ControlPlaneEndpoint
 	out.ExternalManagedControlPlane = in.ExternalManagedControlPlane
-	_ = Convert_v1alpha1_IPConfigSpec_To_v1alpha2_IPConfigSpec(out.IPv6Config, in.IPv6Config, s)
+	if err := Convert_v1alpha1_IPConfigSpec_To_v1alpha2_IPConfigSpec(out.IPv6Config, in.IPv6Config, s); err != nil {
+		return err
+	}
 	return nil
 }

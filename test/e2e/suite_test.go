@@ -43,8 +43,6 @@ import (
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/test/framework/ginkgoextensions"
 	ctrl "sigs.k8s.io/controller-runtime"
-
-	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha1"
 )
 
 const (
@@ -164,12 +162,12 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	initBootstrapCluster(bootstrapClusterProxy, e2eConfig, clusterctlConfigPath, artifactFolder)
 
 	return []byte(
-			strings.Join([]string{
-				artifactFolder,
-				configPath,
-				clusterctlConfigPath,
-				bootstrapClusterProxy.GetKubeconfigPath(),
-			}, ","),
+		strings.Join([]string{
+			artifactFolder,
+			configPath,
+			clusterctlConfigPath,
+			bootstrapClusterProxy.GetKubeconfigPath(),
+		}, ","),
 	)
 }, func(data []byte) {
 	// Before each ParallelNode.
@@ -206,7 +204,7 @@ var _ = SynchronizedAfterSuite(func() {
 func initScheme() *runtime.Scheme {
 	sc := runtime.NewScheme()
 	framework.TryAddDefaultSchemes(sc)
-	Expect(infrav1.AddToScheme(sc)).To(Succeed())
+	Expect(infrav2.AddToScheme(sc)).To(Succeed())
 	Expect(ipamv1.AddToScheme(sc)).To(Succeed())
 
 	return sc

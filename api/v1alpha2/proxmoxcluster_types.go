@@ -46,18 +46,28 @@ const (
 	MultiInstanceMode ProvisioningMode = "MultiInstance"
 )
 
+// ProxmoxInstance defines a Proxmox cluster instance
 type ProxmoxInstance struct {
 	// Name is the identifier for this Proxmox cluster instance
+	// +kubebuilder:validation:Required
 	Name string `json:"name"`
 
 	// Nodes are the Proxmox nodes available in this cluster
+	// +kubebuilder:validation:MinItems=1
 	Nodes []string `json:"nodes"`
 
 	// Template contains the VM template configuration
+	// +kubebuilder:validation:Required
 	Template TemplateSpec `json:"template"`
 
-	// CredentialsRef is a reference to the Secret containing credentials for this Proxmox cluster
-	CredentialsRef corev1.LocalObjectReference `json:"credentialsRef"`
+	//// CredentialsRef is a reference to the Secret containing credentials for this Proxmox cluster
+	//CredentialsRef *corev1.LocalObjectReference `json:"credentialsRef"`
+
+	// CredentialsRef is a reference to a Secret that contains the credentials to use for provisioning this cluster. If not
+	// supplied then the credentials of the controller will be used.
+	// if no namespace is provided, the namespace of the ProxmoxCluster will be used.
+	// +optional
+	CredentialsRef *corev1.SecretReference `json:"credentialsRef,omitempty"`
 }
 
 // TemplateSpec defines the template configuration for VM cloning
@@ -75,36 +85,28 @@ type TemplateSpec struct {
 	TemplateSelector *TemplateSelector `json:"templateSelector,omitempty"`
 }
 
-// TemplateSelector allows selecting a template based on tags
-type TemplateSelector struct {
-	// MatchTags are the tags that should be present on the template
-	MatchTags []string `json:"matchTags"`
-}
-
 // ClusterSettings contains the configuration for multi-cluster provisioning
 type ClusterSettings struct {
 	// Mode specifies the provisioning mode for the cluster
-	// +optional
 	// +kubebuilder:default=Default
-	Mode ProvisioningMode `json:"mode,omitempty"`
+	// +kubebuilder:validation:Enum=Default;SingleInstance;MultiInstance
+	Mode ProvisioningMode `json:"mode"`
 
 	// Instances contains the list of Proxmox cluster instances
-	// +optional
 	Instances []ProxmoxInstance `json:"instances,omitempty"`
 }
 
 // ProxmoxClusterSpec defines the desired state of a ProxmoxCluster.
 type ProxmoxClusterSpec struct {
-	// Settings contains the cluster settings configuration
-	// +kubebuilder:validation:XValidation:rule="self.mode == '' || self.mode == 'Default' || self.mode == 'SingleInstance' || self.mode == 'MultiInstance'",message="mode must be one of: Default, SingleInstance, MultiInstance"
-	Settings ProxmoxClusterSettings `json:"settings,omitempty"`
+	// Settings contains the configuration for multi-cluster provisioning
+	// +optional
+	// +kubebuilder:default={mode:"Default"}
+	Settings *ClusterSettings `json:"settings,omitempty"`
 
 	// ControlPlaneEndpoint represents the endpoint used to communicate with the control plane.
 	// +optional
 	// +kubebuilder:validation:XValidation:rule="self.port > 0 && self.port < 65536",message="port must be within 1-65535"
 	ControlPlaneEndpoint *clusterv1.APIEndpoint `json:"controlPlaneEndpoint"`
-
-	Settings *ClusterSettings `json:"settings,omitempty"`
 
 	// ExternalManagedControlPlane can be enabled to allow externally managed Control Planes to patch the
 	// Proxmox cluster with the Load Balancer IP provided by Control Plane provider.
@@ -115,8 +117,6 @@ type ProxmoxClusterSpec struct {
 	// the node which holds the VM template.
 	// +optional
 	AllowedNodes []string `json:"allowedNodes,omitempty"`
-
-	Nodes []string `json:"nodes,omitempty"`
 
 	// SchedulerHints allows to influence the decision on where a VM will be scheduled. For example by applying a multiplicator
 	// to a node's resources, to allow for overprovisioning or to ensure a node will always have a safety buffer.
@@ -290,7 +290,6 @@ type NodeLocation struct {
 	Node string `json:"node"`
 }
 
-// +kubebuilder:storageversion
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=proxmoxclusters,scope=Namespaced,categories=cluster-api,singular=proxmoxcluster

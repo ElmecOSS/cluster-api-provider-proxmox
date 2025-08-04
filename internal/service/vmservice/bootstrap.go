@@ -28,7 +28,7 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/conditions"
 
-	infrav1alpha1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha1"
+	infrav2alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/internal/inject"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/cloudinit"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/ignition"
@@ -44,7 +44,7 @@ func reconcileBootstrapData(ctx context.Context, machineScope *scope.MachineScop
 
 	if !machineHasIPAddress(machineScope.ProxmoxMachine) {
 		// skip machine doesn't have an IpAddress yet.
-		conditions.MarkFalse(machineScope.ProxmoxMachine, infrav1alpha1.VMProvisionedCondition, infrav1alpha1.WaitingForStaticIPAllocationReason, clusterv1.ConditionSeverityWarning, "no ip address")
+		conditions.MarkFalse(machineScope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition, infrav2alpha2.WaitingForStaticIPAllocationReason, clusterv1.ConditionSeverityWarning, "no ip address")
 		return true, nil
 	}
 
@@ -58,7 +58,7 @@ func reconcileBootstrapData(ctx context.Context, machineScope *scope.MachineScop
 	// Get the bootstrap data.
 	bootstrapData, format, err := getBootstrapData(ctx, machineScope)
 	if err != nil {
-		conditions.MarkFalse(machineScope.ProxmoxMachine, infrav1alpha1.VMProvisionedCondition, infrav1alpha1.CloningFailedReason, clusterv1.ConditionSeverityWarning, "%s", err)
+		conditions.MarkFalse(machineScope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition, infrav2alpha2.CloningFailedReason, clusterv1.ConditionSeverityWarning, "%s", err)
 		return false, err
 	}
 
@@ -66,7 +66,7 @@ func reconcileBootstrapData(ctx context.Context, machineScope *scope.MachineScop
 
 	nicData, err := getNetworkConfigData(ctx, machineScope)
 	if err != nil {
-		conditions.MarkFalse(machineScope.ProxmoxMachine, infrav1alpha1.VMProvisionedCondition, infrav1alpha1.WaitingForStaticIPAllocationReason, clusterv1.ConditionSeverityWarning, "%s", err)
+		conditions.MarkFalse(machineScope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition, infrav2alpha2.WaitingForStaticIPAllocationReason, clusterv1.ConditionSeverityWarning, "%s", err)
 		return false, err
 	}
 
@@ -97,11 +97,11 @@ func injectCloudInit(ctx context.Context, machineScope *scope.MachineScope, boot
 	network := cloudinit.NewNetworkConfig(nicData)
 
 	// create metadata renderer
-	metadata := cloudinit.NewMetadata(biosUUID, machineScope.Name(), kubernetesVersion, ptr.Deref(machineScope.ProxmoxMachine.Spec.MetadataSettings, infrav1alpha1.MetadataSettings{ProviderIDInjection: false}).ProviderIDInjection)
+	metadata := cloudinit.NewMetadata(biosUUID, machineScope.Name(), kubernetesVersion, ptr.Deref(machineScope.ProxmoxMachine.Spec.MetadataSettings, infrav2alpha2.MetadataSettings{ProviderIDInjection: false}).ProviderIDInjection)
 
 	injector := getISOInjector(machineScope.VirtualMachine, bootstrapData, metadata, network)
 	if err := injector.Inject(ctx, inject.CloudConfigFormat); err != nil {
-		conditions.MarkFalse(machineScope.ProxmoxMachine, infrav1alpha1.VMProvisionedCondition, infrav1alpha1.VMProvisionFailedReason, clusterv1.ConditionSeverityWarning, "%s", err)
+		conditions.MarkFalse(machineScope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition, infrav2alpha2.VMProvisionFailedReason, clusterv1.ConditionSeverityWarning, "%s", err)
 		return err
 	}
 	return nil
@@ -109,7 +109,7 @@ func injectCloudInit(ctx context.Context, machineScope *scope.MachineScope, boot
 
 func injectIgnition(ctx context.Context, machineScope *scope.MachineScope, bootstrapData []byte, biosUUID string, nicData []types.NetworkConfigData, kubernetesVersion string) error {
 	// create metadata renderer
-	metadata := cloudinit.NewMetadata(biosUUID, machineScope.Name(), kubernetesVersion, ptr.Deref(machineScope.ProxmoxMachine.Spec.MetadataSettings, infrav1alpha1.MetadataSettings{ProviderIDInjection: false}).ProviderIDInjection)
+	metadata := cloudinit.NewMetadata(biosUUID, machineScope.Name(), kubernetesVersion, ptr.Deref(machineScope.ProxmoxMachine.Spec.MetadataSettings, infrav2alpha2.MetadataSettings{ProviderIDInjection: false}).ProviderIDInjection)
 
 	// create an enricher
 	enricher := &ignition.Enricher{
@@ -122,7 +122,7 @@ func injectIgnition(ctx context.Context, machineScope *scope.MachineScope, boots
 
 	injector := getIgnitionISOInjector(machineScope.VirtualMachine, metadata, enricher)
 	if err := injector.Inject(ctx, inject.IgnitionFormat); err != nil {
-		conditions.MarkFalse(machineScope.ProxmoxMachine, infrav1alpha1.VMProvisionedCondition, infrav1alpha1.VMProvisionFailedReason, clusterv1.ConditionSeverityWarning, "%s", err)
+		conditions.MarkFalse(machineScope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition, infrav2alpha2.VMProvisionFailedReason, clusterv1.ConditionSeverityWarning, "%s", err)
 		return err
 	}
 	return nil
@@ -183,7 +183,7 @@ func getBootstrapData(ctx context.Context, scope *scope.MachineScope) ([]byte, *
 
 func getNetworkConfigData(ctx context.Context, machineScope *scope.MachineScope) ([]types.NetworkConfigData, error) {
 	// provide a default in case network is not defined
-	network := ptr.Deref(machineScope.ProxmoxMachine.Spec.Network, infrav1alpha1.NetworkSpec{})
+	network := ptr.Deref(machineScope.ProxmoxMachine.Spec.Network, infrav2alpha2.NetworkSpec{})
 	networkConfigData := make([]types.NetworkConfigData, 0, 1+len(network.AdditionalDevices)+len(network.VRFs))
 
 	defaultConfig, err := getDefaultNetworkDevice(ctx, machineScope)
@@ -207,7 +207,7 @@ func getNetworkConfigData(ctx context.Context, machineScope *scope.MachineScope)
 	return networkConfigData, nil
 }
 
-func getRoutingData(routes []infrav1alpha1.RouteSpec) *[]types.RoutingData {
+func getRoutingData(routes []infrav2alpha2.RouteSpec) *[]types.RoutingData {
 	routingData := make([]types.RoutingData, 0, len(routes))
 	for _, route := range routes {
 		routeSpec := types.RoutingData{}
@@ -221,7 +221,7 @@ func getRoutingData(routes []infrav1alpha1.RouteSpec) *[]types.RoutingData {
 	return &routingData
 }
 
-func getRoutingPolicyData(rules []infrav1alpha1.RoutingPolicySpec) *[]types.FIBRuleData {
+func getRoutingPolicyData(rules []infrav2alpha2.RoutingPolicySpec) *[]types.FIBRuleData {
 	routingPolicyData := make([]types.FIBRuleData, 0, len(rules))
 	for _, rule := range rules {
 		ruleSpec := types.FIBRuleData{}
@@ -339,7 +339,7 @@ func getDefaultNetworkDevice(ctx context.Context, machineScope *scope.MachineSco
 	return []types.NetworkConfigData{config}, nil
 }
 
-func getCommonInterfaceConfig(ctx context.Context, machineScope *scope.MachineScope, ciconfig *types.NetworkConfigData, nic infrav1alpha1.AdditionalNetworkDevice) error {
+func getCommonInterfaceConfig(ctx context.Context, machineScope *scope.MachineScope, ciconfig *types.NetworkConfigData, nic infrav2alpha2.AdditionalNetworkDevice) error {
 	if len(nic.DNSServers) != 0 {
 		ciconfig.DNSServers = nic.DNSServers
 	}
@@ -350,7 +350,7 @@ func getCommonInterfaceConfig(ctx context.Context, machineScope *scope.MachineSc
 	// Only set IPAddresses if they haven't been set yet
 	if ippool := nic.NetworkDevice.IPv4PoolRef; ippool != nil && ciconfig.IPAddress == "" {
 		// retrieve IPAddress.
-		var ifname = fmt.Sprintf("%s-%s", ciconfig.Name, infrav1alpha1.DefaultSuffix)
+		var ifname = fmt.Sprintf("%s-%s", ciconfig.Name, infrav2alpha2.DefaultSuffix)
 		ipAddr, err := findIPAddress(ctx, machineScope, ifname)
 		if err != nil {
 			return errors.Wrapf(err, "unable to find IPAddress, device=%s", ifname)
@@ -365,7 +365,7 @@ func getCommonInterfaceConfig(ctx context.Context, machineScope *scope.MachineSc
 		ciconfig.Metric = metric
 	}
 	if nic.NetworkDevice.IPv6PoolRef != nil && ciconfig.IPV6Address == "" {
-		var ifname = fmt.Sprintf("%s-%s", ciconfig.Name, infrav1alpha1.DefaultSuffix+"6")
+		var ifname = fmt.Sprintf("%s-%s", ciconfig.Name, infrav2alpha2.DefaultSuffix+"6")
 		ipAddr, err := findIPAddress(ctx, machineScope, ifname)
 		if err != nil {
 			return errors.Wrapf(err, "unable to find IPAddress, device=%s", ifname)
@@ -382,7 +382,7 @@ func getCommonInterfaceConfig(ctx context.Context, machineScope *scope.MachineSc
 	return nil
 }
 
-func getVirtualNetworkDevices(_ context.Context, _ *scope.MachineScope, network infrav1alpha1.NetworkSpec, data []types.NetworkConfigData) ([]types.NetworkConfigData, error) {
+func getVirtualNetworkDevices(_ context.Context, _ *scope.MachineScope, network infrav2alpha2.NetworkSpec, data []types.NetworkConfigData) ([]types.NetworkConfigData, error) {
 	networkConfigData := make([]types.NetworkConfigData, 0, len(network.VRFs))
 
 	for _, device := range network.VRFs {
@@ -409,7 +409,7 @@ func getVirtualNetworkDevices(_ context.Context, _ *scope.MachineScope, network 
 	return networkConfigData, nil
 }
 
-func getAdditionalNetworkDevices(ctx context.Context, machineScope *scope.MachineScope, network infrav1alpha1.NetworkSpec) ([]types.NetworkConfigData, error) {
+func getAdditionalNetworkDevices(ctx context.Context, machineScope *scope.MachineScope, network infrav2alpha2.NetworkSpec) ([]types.NetworkConfigData, error) {
 	networkConfigData := make([]types.NetworkConfigData, 0, len(network.AdditionalDevices))
 
 	// additional network devices append after the provisioning interface
@@ -419,7 +419,7 @@ func getAdditionalNetworkDevices(ctx context.Context, machineScope *scope.Machin
 		var config = ptr.To(types.NetworkConfigData{})
 
 		if nic.IPv4PoolRef != nil {
-			device := fmt.Sprintf("%s-%s", nic.Name, infrav1alpha1.DefaultSuffix)
+			device := fmt.Sprintf("%s-%s", nic.Name, infrav2alpha2.DefaultSuffix)
 			conf, err := getNetworkConfigDataForDevice(ctx, machineScope, device)
 			if err != nil {
 				return nil, errors.Wrapf(err, "unable to get network config data for device=%s", device)
@@ -431,7 +431,7 @@ func getAdditionalNetworkDevices(ctx context.Context, machineScope *scope.Machin
 		}
 
 		if nic.IPv6PoolRef != nil {
-			suffix := infrav1alpha1.DefaultSuffix + "6"
+			suffix := infrav2alpha2.DefaultSuffix + "6"
 			device := fmt.Sprintf("%s-%s", nic.Name, suffix)
 			conf, err := getNetworkConfigDataForDevice(ctx, machineScope, device)
 			if err != nil {

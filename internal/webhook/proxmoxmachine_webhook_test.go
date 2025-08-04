@@ -17,6 +17,7 @@ limitations under the License.
 package webhook
 
 import (
+	infrav2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -26,8 +27,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha1"
 )
 
 var _ = Describe("Controller Test", func() {
@@ -81,13 +80,13 @@ var _ = Describe("Controller Test", func() {
 
 		It("should disallow machine with network spec but without Default device", func() {
 			machine := validProxmoxMachine("test-machine")
-			machine.Spec.Network = &infrav1.NetworkSpec{
-				AdditionalDevices: []infrav1.AdditionalNetworkDevice{
+			machine.Spec.Network = &infrav2.NetworkSpec{
+				AdditionalDevices: []infrav2.AdditionalNetworkDevice{
 					{
 						Name: "net1",
-						NetworkDevice: infrav1.NetworkDevice{
+						NetworkDevice: infrav2.NetworkDevice{
 							Bridge: "vmbr2",
-							IPPoolConfig: infrav1.IPPoolConfig{
+							IPPoolConfig: infrav2.IPPoolConfig{
 								IPv4PoolRef: &corev1.TypedLocalObjectReference{
 									APIGroup: ptr.To("ipam.cluster.x-k8s.io"),
 									Kind:     "InClusterIPPool",
@@ -134,15 +133,15 @@ var _ = Describe("Controller Test", func() {
 	})
 })
 
-func validProxmoxMachine(name string) infrav1.ProxmoxMachine {
-	return infrav1.ProxmoxMachine{
+func validProxmoxMachine(name string) infrav2.ProxmoxMachine {
+	return infrav2.ProxmoxMachine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 		},
-		Spec: infrav1.ProxmoxMachineSpec{
-			VirtualMachineCloneSpec: infrav1.VirtualMachineCloneSpec{
-				TemplateSource: infrav1.TemplateSource{
+		Spec: infrav2.ProxmoxMachineSpec{
+			VirtualMachineCloneSpec: infrav2.VirtualMachineCloneSpec{
+				TemplateSource: infrav2.TemplateSource{
 					SourceNode: "pve",
 					TemplateID: ptr.To[int32](100),
 				},
@@ -150,28 +149,28 @@ func validProxmoxMachine(name string) infrav1.ProxmoxMachine {
 			NumSockets: 1,
 			NumCores:   1,
 			MemoryMiB:  1024,
-			Disks: &infrav1.Storage{
-				BootVolume: &infrav1.DiskSize{
+			Disks: &infrav2.Storage{
+				BootVolume: &infrav2.DiskSize{
 					Disk:   "scsi[0]",
 					SizeGB: 10,
 				},
 			},
-			Network: &infrav1.NetworkSpec{
-				Default: &infrav1.NetworkDevice{
+			Network: &infrav2.NetworkSpec{
+				Default: &infrav2.NetworkDevice{
 					Bridge: "vmbr1",
 					Model:  ptr.To("virtio"),
 					MTU:    ptr.To(uint16(1500)),
 					VLAN:   ptr.To(uint16(100)),
 				},
-				AdditionalDevices: []infrav1.AdditionalNetworkDevice{
+				AdditionalDevices: []infrav2.AdditionalNetworkDevice{
 					{
 						Name: "net1",
-						NetworkDevice: infrav1.NetworkDevice{
+						NetworkDevice: infrav2.NetworkDevice{
 							Bridge: "vmbr2",
 							Model:  ptr.To("virtio"),
 							MTU:    ptr.To(uint16(1500)),
 							VLAN:   ptr.To(uint16(100)),
-							IPPoolConfig: infrav1.IPPoolConfig{
+							IPPoolConfig: infrav2.IPPoolConfig{
 								IPv4PoolRef: &corev1.TypedLocalObjectReference{
 									Name:     "simple-pool",
 									Kind:     "InClusterIPPool",
@@ -179,21 +178,21 @@ func validProxmoxMachine(name string) infrav1.ProxmoxMachine {
 								},
 							},
 						},
-						InterfaceConfig: infrav1.InterfaceConfig{
-							Routing: infrav1.Routing{
-								RoutingPolicy: []infrav1.RoutingPolicySpec{{
+						InterfaceConfig: infrav2.InterfaceConfig{
+							Routing: infrav2.Routing{
+								RoutingPolicy: []infrav2.RoutingPolicySpec{{
 									Table: ptr.To(uint32(665)),
 								}},
 							},
 						},
 					},
 				},
-				VirtualNetworkDevices: infrav1.VirtualNetworkDevices{
-					VRFs: []infrav1.VRFDevice{{
+				VirtualNetworkDevices: infrav2.VirtualNetworkDevices{
+					VRFs: []infrav2.VRFDevice{{
 						Table: 665,
 						Name:  "vrf-green",
-						Routing: infrav1.Routing{
-							RoutingPolicy: []infrav1.RoutingPolicySpec{{
+						Routing: infrav2.Routing{
+							RoutingPolicy: []infrav2.RoutingPolicySpec{{
 								Table: ptr.To(uint32(665)),
 							}},
 						}},
@@ -204,9 +203,9 @@ func validProxmoxMachine(name string) infrav1.ProxmoxMachine {
 	}
 }
 
-func invalidMTUProxmoxMachine(name string) infrav1.ProxmoxMachine {
+func invalidMTUProxmoxMachine(name string) infrav2.ProxmoxMachine {
 	machine := validProxmoxMachine(name)
-	machine.Spec.Network.Default = &infrav1.NetworkDevice{
+	machine.Spec.Network.Default = &infrav2.NetworkDevice{
 		Bridge: "vmbr1",
 		Model:  ptr.To("virtio"),
 		MTU:    ptr.To(uint16(50)),
@@ -214,9 +213,9 @@ func invalidMTUProxmoxMachine(name string) infrav1.ProxmoxMachine {
 	return machine
 }
 
-func invalidVLANProxmoxMachine(name string) infrav1.ProxmoxMachine {
+func invalidVLANProxmoxMachine(name string) infrav2.ProxmoxMachine {
 	machine := validProxmoxMachine(name)
-	machine.Spec.Network.Default = &infrav1.NetworkDevice{
+	machine.Spec.Network.Default = &infrav2.NetworkDevice{
 		Bridge: "vmbr1",
 		Model:  ptr.To("virtio"),
 		VLAN:   ptr.To(uint16(0)),

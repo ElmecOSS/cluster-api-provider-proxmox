@@ -21,6 +21,7 @@ package ipam
 import (
 	"context"
 	"fmt"
+	infrav2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -34,18 +35,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
-	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha1"
 )
 
 // Helper provides handling of ipam objects such as, InClusterPool, IPAddressClaim.
 type Helper struct {
 	ctrlClient client.Client
-	cluster    *infrav1.ProxmoxCluster
+	cluster    *infrav2.ProxmoxCluster
 }
 
 // NewHelper creates new Helper.
-func NewHelper(c client.Client, infraCluster *infrav1.ProxmoxCluster) *Helper {
+func NewHelper(c client.Client, infraCluster *infrav2.ProxmoxCluster) *Helper {
 	h := new(Helper)
 	h.ctrlClient = c
 	h.cluster = infraCluster
@@ -54,7 +53,7 @@ func NewHelper(c client.Client, infraCluster *infrav1.ProxmoxCluster) *Helper {
 }
 
 // InClusterPoolFormat returns the name of the `InClusterIPPool` for a given cluster.
-func InClusterPoolFormat(cluster *infrav1.ProxmoxCluster, format string) string {
+func InClusterPoolFormat(cluster *infrav2.ProxmoxCluster, format string) string {
 	return fmt.Sprintf("%s-%s-icip", cluster.GetName(), format)
 }
 
@@ -72,7 +71,7 @@ func (h *Helper) CreateOrUpdateInClusterIPPool(ctx context.Context) error {
 
 		v4Pool := &ipamicv1.InClusterIPPool{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      InClusterPoolFormat(h.cluster, infrav1.IPV4Format),
+				Name:      InClusterPoolFormat(h.cluster, infrav2.IPV4Format),
 				Namespace: h.cluster.GetNamespace(),
 				Annotations: func() map[string]string {
 					if ipv4Config.Metric != nil {
@@ -114,7 +113,7 @@ func (h *Helper) CreateOrUpdateInClusterIPPool(ctx context.Context) error {
 	if h.cluster.Spec.IPv6Config != nil {
 		v6Pool := &ipamicv1.InClusterIPPool{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      InClusterPoolFormat(h.cluster, infrav1.IPV6Format),
+				Name:      InClusterPoolFormat(h.cluster, infrav2.IPV6Format),
 				Namespace: h.cluster.GetNamespace(),
 				Annotations: func() map[string]string {
 					if h.cluster.Spec.IPv6Config.Metric != nil {
@@ -225,13 +224,13 @@ func (h *Helper) CreateIPAddressClaim(ctx context.Context, owner client.Object, 
 		Namespace: owner.GetNamespace(),
 		Name:      owner.GetName(),
 	}
-	suffix := infrav1.DefaultSuffix
-	if format == infrav1.IPV6Format {
+	suffix := infrav2.DefaultSuffix
+	if format == infrav2.IPV6Format {
 		suffix += "6"
 	}
 
 	switch {
-	case device == infrav1.DefaultNetworkDevice && ref == nil:
+	case device == infrav2.DefaultNetworkDevice && ref == nil:
 		pool, err := h.GetDefaultInClusterIPPool(ctx, format)
 		if err != nil {
 			return errors.Wrapf(err, "unable to find inclusterpool for cluster %s", h.cluster.Name)

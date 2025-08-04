@@ -21,8 +21,8 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+
 	"net/http"
-	"sigs.k8s.io/cluster-api/test/infrastructure/inmemory/pkg/runtime"
 	"slices"
 	"strings"
 
@@ -39,32 +39,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	infrav1alpha1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha1"
-	infrav1alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
+	infrav2alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/internal/tlshelper"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/kubernetes/ipam"
 	capmox "github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox/goproxmox"
 )
 
-// Helper function to get mode regardless of version
-func getClusterMode(obj runtime.Object) string {
-	switch o := obj.(type) {
-	case *infrav1alpha1.ProxmoxCluster:
-		return string(infrav1alpha2.ModeDefault)
-	case *infrav1alpha2.ProxmoxCluster:
-		return string(o.Spec.Settings.Mode)
-	default:
-		return ""
-	}
-}
-
 // ClusterScopeParams defines the input parameters used to create a new Scope.
 type ClusterScopeParams struct {
 	Client         client.Client
 	Logger         *logr.Logger
 	Cluster        *clusterv1.Cluster
-	ProxmoxCluster *infrav1alpha1.ProxmoxCluster
+	ProxmoxCluster *infrav2alpha2.ProxmoxCluster
 	ProxmoxClient  capmox.Client
 	ControllerName string
 	IPAMHelper     *ipam.Helper
@@ -77,7 +64,7 @@ type ClusterScope struct {
 	patchHelper *patch.Helper
 
 	Cluster        *clusterv1.Cluster
-	ProxmoxCluster *infrav1alpha1.ProxmoxCluster
+	ProxmoxCluster *infrav2alpha2.ProxmoxCluster
 
 	// Main ProxmoxClient (for backward compatibility)
 	ProxmoxClient capmox.Client
@@ -159,6 +146,9 @@ func NewClusterScope(params ClusterScopeParams) (*ClusterScope, error) {
 }
 
 func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (capmox.Client, error) {
+	if s.ProxmoxCluster.Spec.Settings.Mode == "" {
+
+	}
 	// Determine which credentials to use based on mode
 	mode := s.ProxmoxCluster.Spec.Settings.Mode
 
@@ -170,10 +160,10 @@ func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (capmox.Client, e
 	var mainClientErr error
 
 	switch mode {
-	case infrav1alpha1.ModeDefault, infrav1alpha1.ModeSingleInstance:
+	case infrav2alpha2.DefaultMode, infrav2alpha2.SingleInstanceMode, "":
 		// Use the cluster-level credentials for main client
 		mainClient, mainClientErr = s.createClientFromCredentialsRef(ctx, s.ProxmoxCluster.Spec.CredentialsRef)
-	case infrav1alpha1.ModeMultiInstance:
+	case infrav2alpha2.MultiInstanceMode:
 		// For multi-instance mode, create a client for each instance with credentials
 		instanceWithClient := false
 
@@ -200,11 +190,10 @@ func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (capmox.Client, e
 			mainClient, mainClientErr = s.createClientFromCredentialsRef(ctx, s.ProxmoxCluster.Spec.CredentialsRef)
 		}
 	}
-
 	// If we couldn't create a main client, fail
 	if mainClient == nil {
 		// Fail the cluster if no credentials found
-		s.ProxmoxCluster.Status.FailureMessage = ptr.To("No valid credentials found, neither in ProxmoxCluster.Spec.CredentialsRef nor in any instance")
+		s.ProxmoxCluster.Status.FailureMessage = ptr.To("No valid credentials , neither in ProxmoxCluster.Spec.CredentialsRef nor in any instance")
 		s.ProxmoxCluster.Status.FailureReason = ptr.To(clustererrors.InvalidConfigurationClusterError)
 
 		if err := s.Close(); err != nil {
@@ -269,7 +258,7 @@ func (s *ClusterScope) createClientFromCredentialsRef(ctx context.Context, credR
 
 // GetClientForInstance returns the client for a specific instance
 func (s *ClusterScope) GetClientForInstance(instanceName string) capmox.Client {
-	if s.ProxmoxCluster.Spec.Settings.Mode != infrav1alpha1.ModeMultiInstance {
+	if s.ProxmoxCluster.Spec.Settings.Mode != infrav2alpha2.MultiInstanceMode {
 		return s.ProxmoxClient
 	}
 
@@ -283,7 +272,7 @@ func (s *ClusterScope) GetClientForInstance(instanceName string) capmox.Client {
 
 // GetClientForNode returns the client responsible for a specific Proxmox node
 func (s *ClusterScope) GetClientForNode(nodeName string) capmox.Client {
-	if s.ProxmoxCluster.Spec.Settings.Mode != infrav1alpha1.ModeMultiInstance {
+	if s.ProxmoxCluster.Spec.Settings.Mode != infrav2alpha2.MultiInstanceMode {
 		return s.ProxmoxClient
 	}
 
@@ -387,7 +376,7 @@ func (s *ClusterScope) PatchObject() error {
 	// always update the readyCondition.
 	conditions.SetSummary(s.ProxmoxCluster,
 		conditions.WithConditions(
-			infrav1alpha1.ProxmoxClusterReady,
+			infrav2alpha2.ProxmoxClusterReady,
 		),
 	)
 
@@ -395,8 +384,8 @@ func (s *ClusterScope) PatchObject() error {
 }
 
 // ListProxmoxMachinesForCluster returns all the ProxmoxMachines that belong to this cluster.
-func (s *ClusterScope) ListProxmoxMachinesForCluster(ctx context.Context) ([]infrav1alpha1.ProxmoxMachine, error) {
-	var machineList infrav1alpha1.ProxmoxMachineList
+func (s *ClusterScope) ListProxmoxMachinesForCluster(ctx context.Context) ([]infrav2alpha2.ProxmoxMachine, error) {
+	var machineList infrav2alpha2.ProxmoxMachineList
 
 	err := s.client.List(ctx, &machineList, client.InNamespace(s.Namespace()), client.MatchingLabels{
 		clusterv1.ClusterNameLabel: s.Name(),

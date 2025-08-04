@@ -19,6 +19,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	infrav2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,7 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha1"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/kubernetes/ipam"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox/proxmoxtest"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/scope"
@@ -49,7 +49,7 @@ func miBytes(in uint64) uint64 {
 
 func TestSelectNode(t *testing.T) {
 	allowedNodes := []string{"pve1", "pve2", "pve3"}
-	var locations []infrav1.NodeLocation
+	var locations []infrav2.NodeLocation
 	const requestMiB = 8
 	availableMem := map[string]uint64{
 		"pve1": miBytes(20),
@@ -66,35 +66,35 @@ func TestSelectNode(t *testing.T) {
 
 	for i, expectedNode := range expectedNodes {
 		t.Run(fmt.Sprintf("round %d", i+1), func(t *testing.T) {
-			proxmoxMachine := &infrav1.ProxmoxMachine{
-				Spec: infrav1.ProxmoxMachineSpec{
+			proxmoxMachine := &infrav2.ProxmoxMachine{
+				Spec: infrav2.ProxmoxMachineSpec{
 					MemoryMiB: requestMiB,
 				},
 			}
 
 			client := fakeResourceClient(availableMem)
 
-			node, err := selectNode(context.Background(), client, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
+			node, err := selectNode(context.Background(), client, proxmoxMachine, locations, allowedNodes, &infrav2.SchedulerHints{})
 			require.NoError(t, err)
 			require.Equal(t, expectedNode, node)
 
 			require.Greater(t, availableMem[node], miBytes(requestMiB))
 			availableMem[node] -= miBytes(requestMiB)
 
-			locations = append(locations, infrav1.NodeLocation{Node: node})
+			locations = append(locations, infrav2.NodeLocation{Node: node})
 		})
 	}
 
 	t.Run("out of memory", func(t *testing.T) {
-		proxmoxMachine := &infrav1.ProxmoxMachine{
-			Spec: infrav1.ProxmoxMachineSpec{
+		proxmoxMachine := &infrav2.ProxmoxMachine{
+			Spec: infrav2.ProxmoxMachineSpec{
 				MemoryMiB: requestMiB,
 			},
 		}
 
 		client := fakeResourceClient(availableMem)
 
-		node, err := selectNode(context.Background(), client, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
+		node, err := selectNode(context.Background(), client, proxmoxMachine, locations, allowedNodes, &infrav2.SchedulerHints{})
 		require.ErrorAs(t, err, &InsufficientMemoryError{})
 		require.Empty(t, node)
 
@@ -113,17 +113,17 @@ func TestScheduleVM(t *testing.T) {
 
 	ipamHelper := &ipam.Helper{}
 
-	proxmoxCluster := infrav1.ProxmoxCluster{
+	proxmoxCluster := infrav2.ProxmoxCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "bar",
 		},
-		Spec: infrav1.ProxmoxClusterSpec{
+		Spec: infrav2.ProxmoxClusterSpec{
 			AllowedNodes: []string{"pve1", "pve2", "pve3"},
 		},
-		Status: infrav1.ProxmoxClusterStatus{
-			NodeLocations: &infrav1.NodeLocations{
-				ControlPlane: []infrav1.NodeLocation{},
-				Workers: []infrav1.NodeLocation{
+		Status: infrav2.ProxmoxClusterStatus{
+			NodeLocations: &infrav2.NodeLocations{
+				ControlPlane: []infrav2.NodeLocation{},
+				Workers: []infrav2.NodeLocation{
 					{
 						Node: "pve1",
 						Machine: corev1.LocalObjectReference{
@@ -138,14 +138,14 @@ func TestScheduleVM(t *testing.T) {
 	err := ctrlClient.Create(context.Background(), &proxmoxCluster)
 	require.NoError(t, err)
 
-	proxmoxMachine := &infrav1.ProxmoxMachine{
+	proxmoxMachine := &infrav2.ProxmoxMachine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "foo-machine",
 			Labels: map[string]string{
 				"cluster.x-k8s.io/cluster-name": "bar",
 			},
 		},
-		Spec: infrav1.ProxmoxMachineSpec{
+		Spec: infrav2.ProxmoxMachineSpec{
 			MemoryMiB: 10,
 		},
 	}
@@ -198,8 +198,8 @@ func TestInsufficientMemoryError_Error(t *testing.T) {
 func setupClient() client.Client {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(infrav1.AddToScheme(scheme))
-	utilruntime.Must(infrav1.AddToScheme(scheme))
+	utilruntime.Must(infrav2.AddToScheme(scheme))
+	utilruntime.Must(infrav2.AddToScheme(scheme))
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 	return fakeClient
