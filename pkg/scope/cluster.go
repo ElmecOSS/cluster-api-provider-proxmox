@@ -52,7 +52,7 @@ type ClusterScopeParams struct {
 	Logger         *logr.Logger
 	Cluster        *clusterv1.Cluster
 	ProxmoxCluster *infrav2alpha2.ProxmoxCluster
-	ProxmoxClient  capmox.Client
+	ProxmoxClient  map[string]capmox.Client
 	ControllerName string
 	IPAMHelper     *ipam.Helper
 }
@@ -66,11 +66,8 @@ type ClusterScope struct {
 	Cluster        *clusterv1.Cluster
 	ProxmoxCluster *infrav2alpha2.ProxmoxCluster
 
-	// Main ProxmoxClient (for backward compatibility)
-	ProxmoxClient capmox.Client
-
 	// Map of instance name to proxmox client for MultiInstance mode
-	InstanceClients map[string]capmox.Client
+	ProxmoxClients map[string]capmox.Client
 
 	controllerName string
 	IPAMHelper     *ipam.Helper
@@ -102,7 +99,7 @@ func NewClusterScope(params ClusterScopeParams) (*ClusterScope, error) {
 		Cluster:        params.Cluster,
 		ProxmoxCluster: params.ProxmoxCluster,
 		controllerName: params.ControllerName,
-		ProxmoxClient:  params.ProxmoxClient,
+		ProxmoxClients: params.ProxmoxClient,
 		IPAMHelper:     params.IPAMHelper,
 	}
 
@@ -113,7 +110,7 @@ func NewClusterScope(params ClusterScopeParams) (*ClusterScope, error) {
 
 	clusterScope.patchHelper = helper
 
-	if clusterScope.ProxmoxClient == nil {
+	if clusterScope.ProxmoxClients == nil {
 		if clusterScope.ProxmoxCluster.Spec.CredentialsRef == nil {
 			// Fail the cluster if no credentials found.
 			// set failure reason
@@ -130,38 +127,43 @@ func NewClusterScope(params ClusterScopeParams) (*ClusterScope, error) {
 		if err != nil {
 			return nil, errors.Wrap(err, "Unable to initialize ProxmoxClient")
 		}
-		clusterScope.ProxmoxClient = pmoxClient
-	}
-
-	if clusterScope.ProxmoxClient == nil {
-		pmoxClient, err := clusterScope.setupProxmoxClient(context.TODO())
-		if err != nil {
-			return nil, errors.Wrap(err, "Unable to initialize ProxmoxClient")
-		}
-		clusterScope.ProxmoxClient = pmoxClient
+		clusterScope.ProxmoxClients = pmoxClient
 	}
 
 	return clusterScope, nil
 }
 
-func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (capmox.Client, error) {
-	if s.ProxmoxCluster.Spec.Settings.Mode == "" {
-
-	}
+func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (map[string]capmox.Client, error) {
 	// Determine which credentials to use based on mode
 	mode := s.ProxmoxCluster.Spec.Settings.Mode
 
 	// Initialize the instance clients map
-	s.InstanceClients = make(map[string]capmox.Client)
+	s.ProxmoxClients = make(map[string]capmox.Client)
 
 	// First create the main client (for backward compatibility)
-	var mainClient capmox.Client
-	var mainClientErr error
+	var prxClient capmox.Client
+	var prxClientErr error
 
 	switch mode {
 	case infrav2alpha2.DefaultMode, infrav2alpha2.SingleInstanceMode, "":
 		// Use the cluster-level credentials for main client
-		mainClient, mainClientErr = s.createClientFromCredentialsRef(ctx, s.ProxmoxCluster.Spec.CredentialsRef)
+		if s.ProxmoxCluster.Spec.Settings.Instances[0].CredentialsRef != nil {
+			// If the first instance has credentials, use it
+			prxClient, prxClientErr = s.createClientFromCredentialsRef(ctx, s.ProxmoxCluster.Spec.Settings.Instances[0].CredentialsRef)
+		} else {
+			// Otherwise, use the cluster-level credentials
+			if s.ProxmoxCluster.Spec.CredentialsRef == nil {
+				s.ProxmoxCluster.Status.FailureMessage = ptr.To("No valid credentials found in ProxmoxCluster.Spec.CredentialsRef")
+				s.ProxmoxCluster.Status.FailureReason = ptr.To(clustererrors.InvalidConfigurationClusterError)
+
+				if err := s.Close(); err != nil {
+					return nil, err
+				}
+				return nil, errors.New("no valid credentials found for Proxmox client")
+			}
+		}
+		prxClient, prxClientErr = s.createClientFromCredentialsRef(ctx, s.ProxmoxCluster.Spec.CredentialsRef)
+		s.ProxmoxClients[s.ProxmoxCluster.Name] = prxClient
 	case infrav2alpha2.MultiInstanceMode:
 		// For multi-instance mode, create a client for each instance with credentials
 		instanceWithClient := false
@@ -175,33 +177,26 @@ func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (capmox.Client, e
 				}
 
 				// Store the client for this instance
-				s.InstanceClients[instance.Name] = clientPrx
+				s.ProxmoxClients[instance.Name] = clientPrx
 
-				// Use the first successful client as the main client
 				if !instanceWithClient {
-					mainClient = clientPrx
 					instanceWithClient = true
 				}
 			}
 		}
-		// If no instance had valid credentials, try using cluster-level credentials
+		// If no instance had valid credentials, fail the clusters
 		if !instanceWithClient {
-			mainClient, mainClientErr = s.createClientFromCredentialsRef(ctx, s.ProxmoxCluster.Spec.CredentialsRef)
+			s.ProxmoxCluster.Status.FailureMessage = ptr.To("No valid credentials found in any instance")
+			s.ProxmoxCluster.Status.FailureReason = ptr.To(clustererrors.InvalidConfigurationClusterError)
+
+			if err := s.Close(); err != nil {
+				return nil, err
+			}
+			return nil, errors.New("no valid credentials found for Proxmox client in any instance")
 		}
 	}
-	// If we couldn't create a main client, fail
-	if mainClient == nil {
-		// Fail the cluster if no credentials found
-		s.ProxmoxCluster.Status.FailureMessage = ptr.To("No valid credentials , neither in ProxmoxCluster.Spec.CredentialsRef nor in any instance")
-		s.ProxmoxCluster.Status.FailureReason = ptr.To(clustererrors.InvalidConfigurationClusterError)
 
-		if err := s.Close(); err != nil {
-			return nil, err
-		}
-		return nil, errors.New("no valid credentials found for Proxmox client")
-	}
-
-	return mainClient, mainClientErr
+	return s.ProxmoxClients, prxClientErr
 }
 
 // Helper method to create a client from credentials reference
@@ -258,34 +253,34 @@ func (s *ClusterScope) createClientFromCredentialsRef(ctx context.Context, credR
 // GetClientForInstance returns the client for a specific instance
 func (s *ClusterScope) GetClientForInstance(instanceName string) capmox.Client {
 	if s.ProxmoxCluster.Spec.Settings.Mode != infrav2alpha2.MultiInstanceMode {
-		return s.ProxmoxClient
+		return s.ProxmoxClients[instanceName]
 	}
 
-	if clientPrx, ok := s.InstanceClients[instanceName]; ok {
+	if clientPrx, ok := s.ProxmoxClients[instanceName]; ok {
 		return clientPrx
 	}
 
 	// Fall back to the main client if no specific client is found
-	return s.ProxmoxClient
+	return s.ProxmoxClients[s.ProxmoxCluster.Name]
 }
 
 // GetClientForNode returns the client responsible for a specific Proxmox node
 func (s *ClusterScope) GetClientForNode(nodeName string) capmox.Client {
 	if s.ProxmoxCluster.Spec.Settings.Mode != infrav2alpha2.MultiInstanceMode {
-		return s.ProxmoxClient
+		return s.ProxmoxClients[s.ProxmoxCluster.Name]
 	}
 
 	// Find which instance this node belongs to
 	for _, instance := range s.ProxmoxCluster.Spec.Settings.Instances {
 		if slices.Contains(instance.Nodes, nodeName) {
-			if clientPrx, ok := s.InstanceClients[instance.Name]; ok {
+			if clientPrx, ok := s.ProxmoxClients[instance.Name]; ok {
 				return clientPrx
 			}
 		}
 	}
 
 	// Fall back to the main client
-	return s.ProxmoxClient
+	return s.ProxmoxClients[s.ProxmoxCluster.Name]
 }
 
 // GetInstanceForNode returns the instance a node belongs to

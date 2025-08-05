@@ -23,24 +23,26 @@ import (
 	"github.com/luthermonson/go-proxmox"
 )
 
+// TODO mockclient
+
 // Client Global Proxmox client interface.
 type Client interface {
-	CloneVM(ctx context.Context, templateID int, clone VMCloneRequest) (VMCloneResponse, error)
+	CloneVM(ctx context.Context, templateID int, clone VMCloneRequest, instanceName string) (VMCloneResponse, error)
 
 	ConfigureVM(ctx context.Context, vm *proxmox.VirtualMachine, options ...VirtualMachineOption) (*proxmox.Task, error)
 
-	FindVMResource(ctx context.Context, vmID uint64) (*proxmox.ClusterResource, error)
-	FindVMTemplateByTags(ctx context.Context, templateTags []string) (string, int32, error)
+	FindVMResource(ctx context.Context, vmID uint64, instanceName string) (*proxmox.ClusterResource, error)
+	FindVMTemplateByTags(ctx context.Context, templateTags []string, instanceName string) (string, int32, error)
 
-	CheckID(ctx context.Context, vmID int64) (bool, error)
+	CheckID(ctx context.Context, vmID int64, instanceName string) (bool, error)
 
-	GetVM(ctx context.Context, nodeName string, vmID int64) (*proxmox.VirtualMachine, error)
+	GetVM(ctx context.Context, nodeName string, vmID int64, instanceName string) (*proxmox.VirtualMachine, error)
 
-	DeleteVM(ctx context.Context, nodeName string, vmID int64) (*proxmox.Task, error)
+	DeleteVM(ctx context.Context, nodeName string, vmID int64, instanceName string) (*proxmox.Task, error)
 
-	GetTask(ctx context.Context, upID string) (*proxmox.Task, error)
+	GetTask(ctx context.Context, upID string, instanceName string) (*proxmox.Task, error)
 
-	GetReservableMemoryBytes(ctx context.Context, nodeName string, nodeMemoryAdjustment uint64) (uint64, error)
+	GetReservableMemoryBytes(ctx context.Context, nodeName string, nodeMemoryAdjustment uint64, instanceName string) (uint64, error)
 
 	ResizeDisk(ctx context.Context, vm *proxmox.VirtualMachine, disk, size string) (*proxmox.Task, error)
 

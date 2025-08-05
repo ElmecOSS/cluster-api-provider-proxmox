@@ -22,6 +22,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	infrastructurev1alpha1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha1"
 	infrastructurev1alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"net/http"
 	"os"
@@ -82,6 +83,7 @@ var (
 func init() {
 	_ = clusterv1.AddToScheme(scheme)
 	_ = clientgoscheme.AddToScheme(scheme)
+	_ = infrastructurev1alpha1.AddToScheme(scheme)
 	_ = infrastructurev1alpha2.AddToScheme(scheme)
 	_ = ipamicv1.AddToScheme(scheme)
 	_ = ipamv1.AddToScheme(scheme)

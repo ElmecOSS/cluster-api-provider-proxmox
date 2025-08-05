@@ -1,7 +1,6 @@
 package v1alpha1
 
 import (
-	"fmt"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	conversion_machinery "k8s.io/apimachinery/pkg/conversion"
 	utilconversion "sigs.k8s.io/cluster-api/util/conversion"
@@ -14,7 +13,6 @@ func (c *ProxmoxCluster) ConvertTo(dstRaw conversion.Hub) error {
 	if err := Convert_v1alpha1_ProxmoxCluster_To_v1alpha2_ProxmoxCluster(c, dst, nil); err != nil {
 		return err
 	}
-	fmt.Println("ConvertTo Test")
 	// Manually restore data.
 	restored := &v1alpha2.ProxmoxCluster{}
 	if ok, err := utilconversion.UnmarshalData(c, restored); err != nil || !ok {
@@ -30,7 +28,6 @@ func (c *ProxmoxCluster) ConvertFrom(srcRaw conversion.Hub) error {
 	if err := Convert_v1alpha2_ProxmoxCluster_To_v1alpha1_ProxmoxCluster(src, c, nil); err != nil {
 		return err
 	}
-	fmt.Println("ConvertFrom Test")
 
 	// Preserve Hub data on down-conversion.
 	if err := utilconversion.MarshalData(src, c); err != nil {
@@ -40,13 +37,18 @@ func (c *ProxmoxCluster) ConvertFrom(srcRaw conversion.Hub) error {
 }
 
 func Convert_v1alpha2_ProxmoxClusterSpec_To_v1alpha1_ProxmoxClusterSpec(in *v1alpha2.ProxmoxClusterSpec, out *ProxmoxClusterSpec, s conversion_machinery.Scope) error {
-	out.AllowedNodes = in.AllowedNodes
+	if in.Settings != nil && len(in.Settings.Instances) > 0 && in.Settings.Mode == v1alpha2.DefaultMode {
+		out.AllowedNodes = in.Settings.Instances[0].Nodes
+	} else {
+		out.AllowedNodes = in.AllowedNodes
+	}
 	out.DNSServers = in.DNSServers
 	out.ControlPlaneEndpoint = in.ControlPlaneEndpoint
 	out.ExternalManagedControlPlane = in.ExternalManagedControlPlane
 	out.SchedulerHints = (*SchedulerHints)(in.SchedulerHints)
 	out.IPv4Config = (*IPConfigSpec)(in.IPv4Config)
 	out.IPv6Config = (*IPConfigSpec)(in.IPv6Config)
+	// todo field clone
 	out.CredentialsRef = in.CredentialsRef
 	// Note: Settings field from v1alpha2 is not supported in v1alpha1 and will be ignored during conversion
 

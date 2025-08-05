@@ -102,6 +102,7 @@ type ClusterSettings struct {
 type ProxmoxClusterSpec struct {
 	// Settings contains the configuration for multi-cluster provisioning
 	// +optional
+	// +kubebuilder:default={"mode":"Default"}
 	Settings *ClusterSettings `json:"settings,omitempty"`
 
 	// ControlPlaneEndpoint represents the endpoint used to communicate with the control plane.
@@ -116,6 +117,7 @@ type ProxmoxClusterSpec struct {
 	// AllowedNodes specifies all Proxmox nodes which will be considered
 	// for operations. This implies that VMs can be cloned on different nodes from
 	// the node which holds the VM template.
+	// Deprecated: Use Settings.Instances[].Nodes instead for multi-instance configurations.
 	// +optional
 	AllowedNodes []string `json:"allowedNodes,omitempty"`
 

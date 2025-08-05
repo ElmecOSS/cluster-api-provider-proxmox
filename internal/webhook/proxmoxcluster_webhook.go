@@ -57,8 +57,6 @@ func (*ProxmoxCluster) ValidateCreate(_ context.Context, obj runtime.Object) (wa
 	if !ok {
 		return warnings, apierrors.NewBadRequest(fmt.Sprintf("expected a ProxmoxCluster but got %T", obj))
 	}
-	fmt.Println("TEST 5")
-	fmt.Println(cluster.Spec.Settings.Instances)
 	if hasNoIPPoolConfig(cluster) {
 		err = errors.New("proxmox cluster must define at least one IP pool config")
 		warnings = append(warnings, fmt.Sprintf("proxmox cluster must define at least one IP pool config %s", cluster.GetName()))

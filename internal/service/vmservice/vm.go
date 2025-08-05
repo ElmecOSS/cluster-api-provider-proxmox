@@ -423,7 +423,7 @@ func createVM(ctx context.Context, scope *scope.MachineScope) (proxmox.VMCloneRe
 			return proxmox.VMCloneResponse{}, err
 		}
 	}
-	res, err := scope.InfraCluster.ProxmoxClient.CloneVM(ctx, int(templateID), options)
+	res, err := scope.InfraCluster.ProxmoxClients[].CloneVM(ctx, int(templateID), options)
 	if err != nil {
 		return res, err
 	}

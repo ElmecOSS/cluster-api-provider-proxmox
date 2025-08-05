@@ -38,8 +38,8 @@ var ErrVMIDFree = errors.New("VMID is free")
 
 // APIClient Proxmox API client object.
 type APIClient struct {
-	*proxmox.Client
-	logger logr.Logger
+	clients map[string]*proxmox.Client
+	logger  logr.Logger
 }
 
 // NewAPIClient initializes a Proxmox API client. If the client is misconfigured, an error is returned.
@@ -65,9 +65,10 @@ func NewAPIClient(ctx context.Context, logger logr.Logger, baseURL string, optio
 }
 
 // CloneVM clones a VM based on templateID and VMCloneRequest.
-func (c *APIClient) CloneVM(ctx context.Context, templateID int, clone capmox.VMCloneRequest) (capmox.VMCloneResponse, error) {
+func (c *APIClient) CloneVM(ctx context.Context, templateID int, clone capmox.VMCloneRequest, instanceName string) (capmox.VMCloneResponse, error) {
 	// get the node
-	node, err := c.Node(ctx, clone.Node)
+	client := c.clients[instanceName]
+	node, err := client.Node(ctx, clone.Node)
 	if err != nil {
 		return capmox.VMCloneResponse{}, fmt.Errorf("cannot find node with name %s: %w", clone.Node, err)
 	}
@@ -107,8 +108,10 @@ func (c *APIClient) ConfigureVM(ctx context.Context, vm *proxmox.VirtualMachine,
 }
 
 // GetVM returns a VM based on nodeName and vmID.
-func (c *APIClient) GetVM(ctx context.Context, nodeName string, vmID int64) (*proxmox.VirtualMachine, error) {
-	node, err := c.Node(ctx, nodeName)
+func (c *APIClient) GetVM(ctx context.Context, nodeName string, vmID int64, instanceName string) (*proxmox.VirtualMachine, error) {
+	client := c.clients[instanceName]
+
+	node, err := client.Node(ctx, nodeName)
 	if err != nil {
 		return nil, fmt.Errorf("cannot find node with name %s: %w", nodeName, err)
 	}
@@ -122,8 +125,9 @@ func (c *APIClient) GetVM(ctx context.Context, nodeName string, vmID int64) (*pr
 }
 
 // FindVMResource tries to find a VM by its ID on the whole cluster.
-func (c *APIClient) FindVMResource(ctx context.Context, vmID uint64) (*proxmox.ClusterResource, error) {
-	cluster, err := c.Cluster(ctx)
+func (c *APIClient) FindVMResource(ctx context.Context, vmID uint64, instanceName string) (*proxmox.ClusterResource, error) {
+	client := c.clients[instanceName]
+	cluster, err := client.Cluster(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get cluster status: %w", err)
 	}
@@ -143,7 +147,9 @@ func (c *APIClient) FindVMResource(ctx context.Context, vmID uint64) (*proxmox.C
 }
 
 // FindVMTemplateByTags tries to find a VMID by its tags across the whole cluster.
-func (c *APIClient) FindVMTemplateByTags(ctx context.Context, templateTags []string) (string, int32, error) {
+func (c *APIClient) FindVMTemplateByTags(ctx context.Context, templateTags []string, instanceName string) (string, int32, error) {
+	client := c.clients[instanceName]
+
 	vmTemplates := make([]*proxmox.ClusterResource, 0)
 
 	sortedTags := make([]string, len(templateTags))
@@ -154,7 +160,7 @@ func (c *APIClient) FindVMTemplateByTags(ctx context.Context, templateTags []str
 	slices.Sort(sortedTags)
 	uniqueTags := slices.Compact(sortedTags)
 
-	cluster, err := c.Cluster(ctx)
+	cluster, err := client.Cluster(ctx)
 	if err != nil {
 		return "", -1, fmt.Errorf("cannot get cluster status: %w", err)
 	}
@@ -188,19 +194,21 @@ func (c *APIClient) FindVMTemplateByTags(ctx context.Context, templateTags []str
 }
 
 // DeleteVM deletes a VM based on the nodeName and vmID.
-func (c *APIClient) DeleteVM(ctx context.Context, nodeName string, vmID int64) (*proxmox.Task, error) {
+func (c *APIClient) DeleteVM(ctx context.Context, nodeName string, vmID int64, instanceName string) (*proxmox.Task, error) {
+	client := c.clients[instanceName]
+
 	// A vmID can not be lower than 100.
 	// If the provided vmID is lower (like -1 in issue #31), just error out without calling the API.
 	if vmID < 100 {
 		return nil, fmt.Errorf("vm with id %d does not exist", vmID)
 	}
 
-	node, err := c.Node(ctx, nodeName)
+	node, err := client.Node(ctx, nodeName)
 	if err != nil {
 		return nil, fmt.Errorf("cannot find node with name %s: %w", nodeName, err)
 	}
 
-	cluster, err := c.Cluster(ctx)
+	cluster, err := client.Cluster(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get cluster")
 	}
@@ -232,8 +240,10 @@ func (c *APIClient) DeleteVM(ctx context.Context, nodeName string, vmID int64) (
 
 // CheckID checks if the vmid is available on the cluster.
 // Returns true if the vmid is available, false if it is taken.
-func (c *APIClient) CheckID(ctx context.Context, vmid int64) (bool, error) {
-	cluster, err := c.Cluster(ctx)
+func (c *APIClient) CheckID(ctx context.Context, vmid int64, instanceName string) (bool, error) {
+	client := c.clients[instanceName]
+
+	cluster, err := client.Cluster(ctx)
 	if err != nil {
 		return false, fmt.Errorf("cannot get cluster")
 	}
@@ -241,8 +251,10 @@ func (c *APIClient) CheckID(ctx context.Context, vmid int64) (bool, error) {
 }
 
 // GetTask returns a task associated with upID.
-func (c *APIClient) GetTask(ctx context.Context, upID string) (*proxmox.Task, error) {
-	task := proxmox.NewTask(proxmox.UPID(upID), c.Client)
+func (c *APIClient) GetTask(ctx context.Context, upID string, instanceName string) (*proxmox.Task, error) {
+	client := c.clients[instanceName]
+
+	task := proxmox.NewTask(proxmox.UPID(upID), client)
 
 	err := task.Ping(ctx)
 	if err != nil {
@@ -253,8 +265,10 @@ func (c *APIClient) GetTask(ctx context.Context, upID string) (*proxmox.Task, er
 }
 
 // GetReservableMemoryBytes returns the memory that can be reserved by a new VM, in bytes.
-func (c *APIClient) GetReservableMemoryBytes(ctx context.Context, nodeName string, nodeMemoryAdjustment uint64) (uint64, error) {
-	node, err := c.Client.Node(ctx, nodeName)
+func (c *APIClient) GetReservableMemoryBytes(ctx context.Context, nodeName string, nodeMemoryAdjustment uint64, instanceName string) (uint64, error) {
+	client := c.clients[instanceName]
+
+	node, err := client.Node(ctx, nodeName)
 	if err != nil {
 		return 0, fmt.Errorf("cannot find node with name %s: %w", nodeName, err)
 	}
