@@ -103,7 +103,6 @@ func (r *ProxmoxClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		return ctrl.Result{}, err
 	}
-
 	// Get owner cluster
 	cluster, err := clusterutil.GetOwnerCluster(ctx, r.Client, proxmoxCluster.ObjectMeta)
 	if err != nil {
@@ -113,7 +112,6 @@ func (r *ProxmoxClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		logger.Info("Waiting for Cluster Controller to set OwnerRef on ProxmoxCluster")
 		return ctrl.Result{}, nil
 	}
-
 	logger = logger.WithValues("cluster", klog.KObj(cluster))
 	ctx = ctrl.LoggerInto(ctx, logger)
 
@@ -122,7 +120,6 @@ func (r *ProxmoxClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 		return ctrl.Result{}, nil
 	}
-
 	// Create the scope.
 	clusterScope, err := scope.NewClusterScope(scope.ClusterScopeParams{
 		Client:         r.Client,
@@ -143,7 +140,8 @@ func (r *ProxmoxClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			reterr = err
 		}
 	}()
-
+	fmt.Println("TEST 4")
+	fmt.Println(proxmoxCluster.Spec.Settings.Instances)
 	// Handle deleted clusters
 	if !proxmoxCluster.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, clusterScope)
@@ -212,6 +210,45 @@ func (r *ProxmoxClusterReconciler) reconcileNormal(ctx context.Context, clusterS
 			conditions.MarkFalse(clusterScope.ProxmoxCluster, infrav2alpha2.ProxmoxClusterReady, infrav2alpha2.MissingControlPlaneEndpointReason, clusterv1.ConditionSeverityWarning, "The ProxmoxCluster is missing or waiting for a ControlPlaneEndpoint port")
 
 			return ctrl.Result{Requeue: true}, nil
+		}
+	}
+
+	// Handle settings based on mode
+	switch clusterScope.ProxmoxCluster.Spec.Settings.Mode {
+	case infrav2alpha2.DefaultMode:
+		clusterScope.Logger.Info("Handling Default provisioning mode")
+		// todo
+
+	case infrav2alpha2.SingleInstanceMode:
+		clusterScope.Logger.Info("Handling SingleInstance provisioning mode")
+
+		// Validate the instances list
+		if len(clusterScope.ProxmoxCluster.Spec.Settings.Instances) != 1 {
+			clusterScope.Logger.Error(fmt.Errorf("invalid configuration"), "SingleInstance mode requires exactly one instance")
+			conditions.MarkFalse(clusterScope.ProxmoxCluster, infrav2alpha2.ProxmoxClusterReady, infrav2alpha2.InvalidInstanceConfigurationReason, clusterv1.ConditionSeverityError, "SingleInstance mode requires exactly one instance")
+			return ctrl.Result{}, nil
+		}
+
+		// Select the single instance
+		instance := clusterScope.ProxmoxCluster.Spec.Settings.Instances[0]
+		clusterScope.Logger.Info("Selected instance for SingleInstance mode", "instance", instance.Name)
+
+		// Validate the instance configuration
+		if len(instance.Nodes) == 0 {
+			clusterScope.Logger.Error(fmt.Errorf("invalid configuration"), "Instance must have at least one node")
+			conditions.MarkFalse(clusterScope.ProxmoxCluster, infrav2alpha2.ProxmoxClusterReady, infrav2alpha2.InvalidInstanceConfigurationReason, clusterv1.ConditionSeverityError, "Instance must have at least one node")
+			return ctrl.Result{}, nil
+		}
+
+	case infrav2alpha2.MultiInstanceMode:
+		clusterScope.Logger.Info("Handling MultiInstance provisioning mode")
+		for _, instance := range clusterScope.ProxmoxCluster.Spec.Settings.Instances {
+			if len(instance.Nodes) == 0 {
+				clusterScope.Logger.Error(fmt.Errorf("instance %s has no nodes", instance.Name), "Invalid instance configuration")
+				continue
+			}
+			clusterScope.Logger.Info("Processing instance", "instance", instance.Name, "nodes", instance.Nodes)
+			// todo
 		}
 	}
 

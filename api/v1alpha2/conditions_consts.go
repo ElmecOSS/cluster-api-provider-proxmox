@@ -81,6 +81,11 @@ const (
 
 	// MissingControlPlaneEndpointReason (Severity=Warning) documents the missing Control Plane endpoint when Cluster is backed by an externally managed Control Plane.
 	MissingControlPlaneEndpointReason = "MissingControlPlaneEndpoint"
+
+	// InvalidInstanceConfigurationReason (Severity=Warning) documents a ProxmoxMachine/ProxmoxVM with invalid configuration
+	// parameters that prevent proper provisioning or operation of the instance. This typically occurs when provided
+	// specifications don't match available resources or violate constraints of the Proxmox environment.
+	InvalidInstanceConfigurationReason = "InvalidInstanceConfiguration"
 )
 
 const (

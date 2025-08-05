@@ -133,7 +133,6 @@ func NewClusterScope(params ClusterScopeParams) (*ClusterScope, error) {
 		clusterScope.ProxmoxClient = pmoxClient
 	}
 
-	// Update this part in NewClusterScope
 	if clusterScope.ProxmoxClient == nil {
 		pmoxClient, err := clusterScope.setupProxmoxClient(context.TODO())
 		if err != nil {

@@ -1883,8 +1883,6 @@ spec:
                     type: integer
                 type: object
               settings:
-                default:
-                  mode: Default
                 description: Settings contains the configuration for multi-cluster
                   provisioning
                 properties:
@@ -1966,6 +1964,11 @@ spec:
                 required:
                 - mode
                 type: object
+                x-kubernetes-validations:
+                - message: When mode is MultiInstance, instances must be specified
+                  rule: self.mode == 'Default' || (self.mode == 'MultiInstance' &&
+                    has(self.instances) && size(self.instances) > 0) || self.mode
+                    == 'SingleInstance'
             required:
             - dnsServers
             type: object

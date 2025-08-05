@@ -86,6 +86,7 @@ type TemplateSpec struct {
 }
 
 // ClusterSettings contains the configuration for multi-cluster provisioning
+// +kubebuilder:validation:XValidation:rule="self.mode == 'Default' || (self.mode == 'MultiInstance' && has(self.instances) && size(self.instances) > 0) || self.mode == 'SingleInstance'",message="When mode is MultiInstance, instances must be specified"
 type ClusterSettings struct {
 	// Mode specifies the provisioning mode for the cluster
 	// +kubebuilder:default=Default
@@ -93,6 +94,7 @@ type ClusterSettings struct {
 	Mode ProvisioningMode `json:"mode"`
 
 	// Instances contains the list of Proxmox cluster instances
+	// +optional
 	Instances []ProxmoxInstance `json:"instances,omitempty"`
 }
 
@@ -100,7 +102,6 @@ type ClusterSettings struct {
 type ProxmoxClusterSpec struct {
 	// Settings contains the configuration for multi-cluster provisioning
 	// +optional
-	// +kubebuilder:default={mode:"Default"}
 	Settings *ClusterSettings `json:"settings,omitempty"`
 
 	// ControlPlaneEndpoint represents the endpoint used to communicate with the control plane.
