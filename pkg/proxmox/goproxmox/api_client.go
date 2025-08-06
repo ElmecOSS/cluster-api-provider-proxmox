@@ -42,7 +42,11 @@ type APIClient struct {
 	logger  logr.Logger
 }
 
-// NewAPIClient initializes a Proxmox API client. If the client is misconfigured, an error is returned.
+const (
+	defaultInstanceName = "default"
+)
+
+// NewAPIClient initializes a default Proxmox API client. If the client is misconfigured, an error is returned.
 func NewAPIClient(ctx context.Context, logger logr.Logger, baseURL string, options ...proxmox.Option) (*APIClient, error) {
 	proxmoxAPIURL, err := url.JoinPath(baseURL, "api2", "json")
 	if err != nil {
@@ -59,15 +63,62 @@ func NewAPIClient(ctx context.Context, logger logr.Logger, baseURL string, optio
 	logger.Info("Proxmox server", "version", version.Release)
 
 	return &APIClient{
-		Client: upstreamClient,
-		logger: logger,
+		clients: map[string]*proxmox.Client{defaultInstanceName: upstreamClient},
+		logger:  logger,
 	}, nil
+}
+
+// NewAPIClientForMultiInstances initializes a Proxmox API client for multiple cluster instances. If the client is misconfigured, an error is returned.
+func NewAPIClientForMultiInstances(ctx context.Context, logger logr.Logger, baseURL, instances []string, options ...[]proxmox.Option) (*APIClient, error) {
+	clients := map[string]*proxmox.Client{}
+	for i, instance := range instances {
+		proxmoxAPIURL, err := url.JoinPath(baseURL[i], "api2", "json")
+		if err != nil {
+			return nil, fmt.Errorf("invalid proxmox base URL %q: %w", baseURL, err)
+		}
+		var opts []proxmox.Option
+		if i < len(options) {
+			opts = append(options[i], proxmox.WithLogger(capmox.Logger{}))
+		} else {
+			opts = []proxmox.Option{proxmox.WithLogger(capmox.Logger{})}
+		}
+		upstreamClient := proxmox.NewClient(proxmoxAPIURL, opts...)
+		version, err := upstreamClient.Version(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("unable to initialize proxmox api client: %w for instance: %s", err, instance)
+		}
+		logger.Info("Proxmox client initialized for instance: " + instance)
+		logger.Info("Proxmox server", "version", version.Release)
+
+		clients[instance] = upstreamClient
+	}
+
+	return &APIClient{
+		clients: clients,
+		logger:  logger,
+	}, nil
+}
+
+// getClient returns the client for the specified instance, falling back to default if not found.
+func (c *APIClient) getClient(instanceName string) *proxmox.Client {
+	if client, ok := c.clients[instanceName]; ok {
+		return client
+	}
+	// Fallback to default client if instance not found
+	if defaultClient, ok := c.clients[defaultInstanceName]; ok {
+		return defaultClient
+	}
+	// Return any available client as last resort
+	for _, client := range c.clients {
+		return client
+	}
+	return nil
 }
 
 // CloneVM clones a VM based on templateID and VMCloneRequest.
 func (c *APIClient) CloneVM(ctx context.Context, templateID int, clone capmox.VMCloneRequest, instanceName string) (capmox.VMCloneResponse, error) {
 	// get the node
-	client := c.clients[instanceName]
+	client := c.getClient(instanceName)
 	node, err := client.Node(ctx, clone.Node)
 	if err != nil {
 		return capmox.VMCloneResponse{}, fmt.Errorf("cannot find node with name %s: %w", clone.Node, err)
@@ -109,7 +160,7 @@ func (c *APIClient) ConfigureVM(ctx context.Context, vm *proxmox.VirtualMachine,
 
 // GetVM returns a VM based on nodeName and vmID.
 func (c *APIClient) GetVM(ctx context.Context, nodeName string, vmID int64, instanceName string) (*proxmox.VirtualMachine, error) {
-	client := c.clients[instanceName]
+	client := c.getClient(instanceName)
 
 	node, err := client.Node(ctx, nodeName)
 	if err != nil {
@@ -126,7 +177,7 @@ func (c *APIClient) GetVM(ctx context.Context, nodeName string, vmID int64, inst
 
 // FindVMResource tries to find a VM by its ID on the whole cluster.
 func (c *APIClient) FindVMResource(ctx context.Context, vmID uint64, instanceName string) (*proxmox.ClusterResource, error) {
-	client := c.clients[instanceName]
+	client := c.getClient(instanceName)
 	cluster, err := client.Cluster(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get cluster status: %w", err)
@@ -148,7 +199,7 @@ func (c *APIClient) FindVMResource(ctx context.Context, vmID uint64, instanceNam
 
 // FindVMTemplateByTags tries to find a VMID by its tags across the whole cluster.
 func (c *APIClient) FindVMTemplateByTags(ctx context.Context, templateTags []string, instanceName string) (string, int32, error) {
-	client := c.clients[instanceName]
+	client := c.getClient(instanceName)
 
 	vmTemplates := make([]*proxmox.ClusterResource, 0)
 
@@ -195,7 +246,7 @@ func (c *APIClient) FindVMTemplateByTags(ctx context.Context, templateTags []str
 
 // DeleteVM deletes a VM based on the nodeName and vmID.
 func (c *APIClient) DeleteVM(ctx context.Context, nodeName string, vmID int64, instanceName string) (*proxmox.Task, error) {
-	client := c.clients[instanceName]
+	client := c.getClient(instanceName)
 
 	// A vmID can not be lower than 100.
 	// If the provided vmID is lower (like -1 in issue #31), just error out without calling the API.
@@ -241,7 +292,7 @@ func (c *APIClient) DeleteVM(ctx context.Context, nodeName string, vmID int64, i
 // CheckID checks if the vmid is available on the cluster.
 // Returns true if the vmid is available, false if it is taken.
 func (c *APIClient) CheckID(ctx context.Context, vmid int64, instanceName string) (bool, error) {
-	client := c.clients[instanceName]
+	client := c.getClient(instanceName)
 
 	cluster, err := client.Cluster(ctx)
 	if err != nil {
@@ -252,7 +303,7 @@ func (c *APIClient) CheckID(ctx context.Context, vmid int64, instanceName string
 
 // GetTask returns a task associated with upID.
 func (c *APIClient) GetTask(ctx context.Context, upID string, instanceName string) (*proxmox.Task, error) {
-	client := c.clients[instanceName]
+	client := c.getClient(instanceName)
 
 	task := proxmox.NewTask(proxmox.UPID(upID), client)
 
@@ -266,7 +317,7 @@ func (c *APIClient) GetTask(ctx context.Context, upID string, instanceName strin
 
 // GetReservableMemoryBytes returns the memory that can be reserved by a new VM, in bytes.
 func (c *APIClient) GetReservableMemoryBytes(ctx context.Context, nodeName string, nodeMemoryAdjustment uint64, instanceName string) (uint64, error) {
-	client := c.clients[instanceName]
+	client := c.getClient(instanceName)
 
 	node, err := client.Node(ctx, nodeName)
 	if err != nil {

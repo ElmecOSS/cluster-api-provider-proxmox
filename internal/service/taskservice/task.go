@@ -20,7 +20,7 @@ package taskservice
 import (
 	"context"
 	"fmt"
-	infrav2alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
+	infrav1alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"time"
 
 	"github.com/luthermonson/go-proxmox"
@@ -55,8 +55,7 @@ func GetTask(ctx context.Context, machineScope *scope.MachineScope) (*proxmox.Ta
 	if machineScope.ProxmoxMachine.Status.TaskRef == nil {
 		return nil, nil
 	}
-
-	task, err := machineScope.InfraCluster.ProxmoxClient.GetTask(ctx, *machineScope.ProxmoxMachine.Status.TaskRef)
+	task, err := machineScope.InfraCluster.ProxmoxClient.GetTask(ctx, *machineScope.ProxmoxMachine.Status.TaskRef, "")
 	if err != nil {
 		return nil, ErrTaskNotFound
 	}
@@ -120,7 +119,7 @@ func checkAndRetryTask(scope *scope.MachineScope, task *proxmox.Task) (bool, err
 		} else {
 			errorMessage = "task failed but its exit status is OK; this should not happen"
 		}
-		conditions.MarkFalse(scope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition, infrav2alpha2.TaskFailure, clusterv1.ConditionSeverityInfo, "%s", errorMessage)
+		conditions.MarkFalse(scope.ProxmoxMachine, infrav1alpha2.VMProvisionedCondition, infrav1alpha2.TaskFailure, clusterv1.ConditionSeverityInfo, "%s", errorMessage)
 
 		// Instead of directly requeuing the failed task, wait for the RetryAfter duration to pass
 		// before resetting the taskRef from the ProxmoxMachine status.
@@ -132,6 +131,6 @@ func checkAndRetryTask(scope *scope.MachineScope, task *proxmox.Task) (bool, err
 		}
 		return true, nil
 	default:
-		return false, NewRequeueError(fmt.Sprintf("unknown task state %q for %q", task.ExitStatus, scope.ProxmoxMachine.Name), infrav2alpha2.DefaultReconcilerRequeue)
+		return false, NewRequeueError(fmt.Sprintf("unknown task state %q for %q", task.ExitStatus, scope.ProxmoxMachine.Name), infrav1alpha2.DefaultReconcilerRequeue)
 	}
 }

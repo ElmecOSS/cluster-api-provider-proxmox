@@ -18,7 +18,7 @@ package vmservice
 
 import (
 	"fmt"
-	infrav2alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
+	infrav1alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"regexp"
 	"strconv"
 	"strings"
@@ -117,7 +117,7 @@ func shouldUpdateNetworkDevices(machineScope *scope.MachineScope) bool {
 	nets := machineScope.VirtualMachine.VirtualMachineConfig.MergeNets()
 
 	if machineScope.ProxmoxMachine.Spec.Network.Default != nil {
-		net0 := nets[infrav2alpha2.DefaultNetworkDevice]
+		net0 := nets[infrav1alpha2.DefaultNetworkDevice]
 		if net0 == "" {
 			return true
 		}

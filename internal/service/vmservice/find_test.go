@@ -19,7 +19,7 @@ package vmservice
 import (
 	"context"
 	"errors"
-	infrav2alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
+	infrav1alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,7 +44,7 @@ func TestFindVM_FindByNodeLocationsAndID(t *testing.T) {
 	machineScope, proxmoxClient, _ := setupReconcilerTest(t)
 	vm := newRunningVM()
 	machineScope.ProxmoxMachine.Spec.VirtualMachineID = ptr.To(int64(vm.VMID))
-	machineScope.InfraCluster.ProxmoxCluster.AddNodeLocation(infrav2alpha2.NodeLocation{
+	machineScope.InfraCluster.ProxmoxCluster.AddNodeLocation(infrav1alpha2.NodeLocation{
 		Machine: corev1.LocalObjectReference{Name: machineScope.ProxmoxMachine.GetName()},
 		Node:    "node3",
 	}, false)
@@ -128,7 +128,7 @@ func TestUpdateVMLocation_UpdateNode(t *testing.T) {
 	vmr := newVMResource()
 	machineScope.ProxmoxMachine.Spec.VirtualMachineID = ptr.To(int64(vm.VMID))
 	machineScope.ProxmoxMachine.Status.ProxmoxNode = ptr.To("node3")
-	machineScope.InfraCluster.ProxmoxCluster.AddNodeLocation(infrav2alpha2.NodeLocation{
+	machineScope.InfraCluster.ProxmoxCluster.AddNodeLocation(infrav1alpha2.NodeLocation{
 		Machine: corev1.LocalObjectReference{Name: machineScope.Name()},
 		Node:    "node3",
 	}, false)

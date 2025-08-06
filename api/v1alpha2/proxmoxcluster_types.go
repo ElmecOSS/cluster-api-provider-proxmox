@@ -470,3 +470,17 @@ func (c *ProxmoxCluster) addNodeLocation(loc NodeLocation, isControlPlane bool) 
 func init() {
 	objectTypes = append(objectTypes, &ProxmoxCluster{}, &ProxmoxClusterList{})
 }
+
+func (c *ProxmoxCluster) GetNodesForInstance(instanceName string) []string {
+	if c.Spec.Settings == nil || c.Spec.Settings.Mode == DefaultMode {
+		return c.Spec.AllowedNodes
+	}
+
+	for _, instance := range c.Spec.Settings.Instances {
+		if instance.Name == instanceName {
+			return instance.Nodes
+		}
+	}
+
+	return nil
+}

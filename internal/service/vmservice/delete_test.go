@@ -19,7 +19,7 @@ package vmservice
 import (
 	"context"
 	"errors"
-	infrav2alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
+	infrav1alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,7 +31,7 @@ func TestDeleteVM_SuccessNotFound(t *testing.T) {
 	machineScope, proxmoxClient, _ := setupReconcilerTest(t)
 	vm := newRunningVM()
 	machineScope.ProxmoxMachine.Spec.VirtualMachineID = ptr.To(int64(vm.VMID))
-	machineScope.InfraCluster.ProxmoxCluster.AddNodeLocation(infrav2alpha2.NodeLocation{
+	machineScope.InfraCluster.ProxmoxCluster.AddNodeLocation(infrav1alpha2.NodeLocation{
 		Machine: corev1.LocalObjectReference{Name: machineScope.Name()},
 		Node:    "node1",
 	}, false)

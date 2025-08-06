@@ -39,7 +39,7 @@ import (
 
 type fakeResourceClient map[string]uint64
 
-func (c fakeResourceClient) GetReservableMemoryBytes(_ context.Context, nodeName string, _ uint64) (uint64, error) {
+func (c fakeResourceClient) GetReservableMemoryBytes(_ context.Context, nodeName string, _ uint64, _ string) (uint64, error) {
 	return c[nodeName], nil
 }
 

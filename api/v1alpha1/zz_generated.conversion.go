@@ -781,7 +781,19 @@ func Convert_v1alpha2_ProxmoxCluster_To_v1alpha1_ProxmoxCluster(in *v1alpha2.Pro
 }
 
 func autoConvert_v1alpha1_ProxmoxClusterCloneSpec_To_v1alpha2_ProxmoxClusterCloneSpec(in *ProxmoxClusterCloneSpec, out *v1alpha2.ProxmoxClusterCloneSpec, s conversion.Scope) error {
-	out.ProxmoxMachineSpec = *(*map[string]v1alpha2.ProxmoxMachineSpec)(unsafe.Pointer(&in.ProxmoxMachineSpec))
+	if in.ProxmoxMachineSpec != nil {
+		in, out := &in.ProxmoxMachineSpec, &out.ProxmoxMachineSpec
+		*out = make(map[string]v1alpha2.ProxmoxMachineSpec, len(*in))
+		for key, val := range *in {
+			newVal := new(v1alpha2.ProxmoxMachineSpec)
+			if err := Convert_v1alpha1_ProxmoxMachineSpec_To_v1alpha2_ProxmoxMachineSpec(&val, newVal, s); err != nil {
+				return err
+			}
+			(*out)[key] = *newVal
+		}
+	} else {
+		out.ProxmoxMachineSpec = nil
+	}
 	out.SSHAuthorizedKeys = *(*[]string)(unsafe.Pointer(&in.SSHAuthorizedKeys))
 	out.VirtualIPNetworkInterface = in.VirtualIPNetworkInterface
 	return nil
@@ -793,7 +805,19 @@ func Convert_v1alpha1_ProxmoxClusterCloneSpec_To_v1alpha2_ProxmoxClusterCloneSpe
 }
 
 func autoConvert_v1alpha2_ProxmoxClusterCloneSpec_To_v1alpha1_ProxmoxClusterCloneSpec(in *v1alpha2.ProxmoxClusterCloneSpec, out *ProxmoxClusterCloneSpec, s conversion.Scope) error {
-	out.ProxmoxMachineSpec = *(*map[string]ProxmoxMachineSpec)(unsafe.Pointer(&in.ProxmoxMachineSpec))
+	if in.ProxmoxMachineSpec != nil {
+		in, out := &in.ProxmoxMachineSpec, &out.ProxmoxMachineSpec
+		*out = make(map[string]ProxmoxMachineSpec, len(*in))
+		for key, val := range *in {
+			newVal := new(ProxmoxMachineSpec)
+			if err := Convert_v1alpha2_ProxmoxMachineSpec_To_v1alpha1_ProxmoxMachineSpec(&val, newVal, s); err != nil {
+				return err
+			}
+			(*out)[key] = *newVal
+		}
+	} else {
+		out.ProxmoxMachineSpec = nil
+	}
 	out.SSHAuthorizedKeys = *(*[]string)(unsafe.Pointer(&in.SSHAuthorizedKeys))
 	out.VirtualIPNetworkInterface = in.VirtualIPNetworkInterface
 	return nil
@@ -854,7 +878,15 @@ func autoConvert_v1alpha1_ProxmoxClusterSpec_To_v1alpha2_ProxmoxClusterSpec(in *
 	out.IPv4Config = (*v1alpha2.IPConfigSpec)(unsafe.Pointer(in.IPv4Config))
 	out.IPv6Config = (*v1alpha2.IPConfigSpec)(unsafe.Pointer(in.IPv6Config))
 	out.DNSServers = *(*[]string)(unsafe.Pointer(&in.DNSServers))
-	out.CloneSpec = (*v1alpha2.ProxmoxClusterCloneSpec)(unsafe.Pointer(in.CloneSpec))
+	if in.CloneSpec != nil {
+		in, out := &in.CloneSpec, &out.CloneSpec
+		*out = new(v1alpha2.ProxmoxClusterCloneSpec)
+		if err := Convert_v1alpha1_ProxmoxClusterCloneSpec_To_v1alpha2_ProxmoxClusterCloneSpec(*in, *out, s); err != nil {
+			return err
+		}
+	} else {
+		out.CloneSpec = nil
+	}
 	out.CredentialsRef = (*v1.SecretReference)(unsafe.Pointer(in.CredentialsRef))
 	return nil
 }
@@ -873,7 +905,15 @@ func autoConvert_v1alpha2_ProxmoxClusterSpec_To_v1alpha1_ProxmoxClusterSpec(in *
 	out.IPv4Config = (*IPConfigSpec)(unsafe.Pointer(in.IPv4Config))
 	out.IPv6Config = (*IPConfigSpec)(unsafe.Pointer(in.IPv6Config))
 	out.DNSServers = *(*[]string)(unsafe.Pointer(&in.DNSServers))
-	out.CloneSpec = (*ProxmoxClusterCloneSpec)(unsafe.Pointer(in.CloneSpec))
+	if in.CloneSpec != nil {
+		in, out := &in.CloneSpec, &out.CloneSpec
+		*out = new(ProxmoxClusterCloneSpec)
+		if err := Convert_v1alpha2_ProxmoxClusterCloneSpec_To_v1alpha1_ProxmoxClusterCloneSpec(*in, *out, s); err != nil {
+			return err
+		}
+	} else {
+		out.CloneSpec = nil
+	}
 	out.CredentialsRef = (*v1.SecretReference)(unsafe.Pointer(in.CredentialsRef))
 	return nil
 }
@@ -1082,7 +1122,17 @@ func Convert_v1alpha2_ProxmoxMachineChecks_To_v1alpha1_ProxmoxMachineChecks(in *
 
 func autoConvert_v1alpha1_ProxmoxMachineList_To_v1alpha2_ProxmoxMachineList(in *ProxmoxMachineList, out *v1alpha2.ProxmoxMachineList, s conversion.Scope) error {
 	out.ListMeta = in.ListMeta
-	out.Items = *(*[]v1alpha2.ProxmoxMachine)(unsafe.Pointer(&in.Items))
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]v1alpha2.ProxmoxMachine, len(*in))
+		for i := range *in {
+			if err := Convert_v1alpha1_ProxmoxMachine_To_v1alpha2_ProxmoxMachine(&(*in)[i], &(*out)[i], s); err != nil {
+				return err
+			}
+		}
+	} else {
+		out.Items = nil
+	}
 	return nil
 }
 
@@ -1093,7 +1143,17 @@ func Convert_v1alpha1_ProxmoxMachineList_To_v1alpha2_ProxmoxMachineList(in *Prox
 
 func autoConvert_v1alpha2_ProxmoxMachineList_To_v1alpha1_ProxmoxMachineList(in *v1alpha2.ProxmoxMachineList, out *ProxmoxMachineList, s conversion.Scope) error {
 	out.ListMeta = in.ListMeta
-	out.Items = *(*[]ProxmoxMachine)(unsafe.Pointer(&in.Items))
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]ProxmoxMachine, len(*in))
+		for i := range *in {
+			if err := Convert_v1alpha2_ProxmoxMachine_To_v1alpha1_ProxmoxMachine(&(*in)[i], &(*out)[i], s); err != nil {
+				return err
+			}
+		}
+	} else {
+		out.Items = nil
+	}
 	return nil
 }
 
@@ -1142,12 +1202,8 @@ func autoConvert_v1alpha2_ProxmoxMachineSpec_To_v1alpha1_ProxmoxMachineSpec(in *
 	out.MetadataSettings = (*MetadataSettings)(unsafe.Pointer(in.MetadataSettings))
 	out.AllowedNodes = *(*[]string)(unsafe.Pointer(&in.AllowedNodes))
 	out.Tags = *(*[]string)(unsafe.Pointer(&in.Tags))
+	// WARNING: in.Instance requires manual conversion: does not exist in peer-type
 	return nil
-}
-
-// Convert_v1alpha2_ProxmoxMachineSpec_To_v1alpha1_ProxmoxMachineSpec is an autogenerated conversion function.
-func Convert_v1alpha2_ProxmoxMachineSpec_To_v1alpha1_ProxmoxMachineSpec(in *v1alpha2.ProxmoxMachineSpec, out *ProxmoxMachineSpec, s conversion.Scope) error {
-	return autoConvert_v1alpha2_ProxmoxMachineSpec_To_v1alpha1_ProxmoxMachineSpec(in, out, s)
 }
 
 func autoConvert_v1alpha1_ProxmoxMachineStatus_To_v1alpha2_ProxmoxMachineStatus(in *ProxmoxMachineStatus, out *v1alpha2.ProxmoxMachineStatus, s conversion.Scope) error {
@@ -1220,7 +1276,17 @@ func Convert_v1alpha2_ProxmoxMachineTemplate_To_v1alpha1_ProxmoxMachineTemplate(
 
 func autoConvert_v1alpha1_ProxmoxMachineTemplateList_To_v1alpha2_ProxmoxMachineTemplateList(in *ProxmoxMachineTemplateList, out *v1alpha2.ProxmoxMachineTemplateList, s conversion.Scope) error {
 	out.ListMeta = in.ListMeta
-	out.Items = *(*[]v1alpha2.ProxmoxMachineTemplate)(unsafe.Pointer(&in.Items))
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]v1alpha2.ProxmoxMachineTemplate, len(*in))
+		for i := range *in {
+			if err := Convert_v1alpha1_ProxmoxMachineTemplate_To_v1alpha2_ProxmoxMachineTemplate(&(*in)[i], &(*out)[i], s); err != nil {
+				return err
+			}
+		}
+	} else {
+		out.Items = nil
+	}
 	return nil
 }
 
@@ -1231,7 +1297,17 @@ func Convert_v1alpha1_ProxmoxMachineTemplateList_To_v1alpha2_ProxmoxMachineTempl
 
 func autoConvert_v1alpha2_ProxmoxMachineTemplateList_To_v1alpha1_ProxmoxMachineTemplateList(in *v1alpha2.ProxmoxMachineTemplateList, out *ProxmoxMachineTemplateList, s conversion.Scope) error {
 	out.ListMeta = in.ListMeta
-	out.Items = *(*[]ProxmoxMachineTemplate)(unsafe.Pointer(&in.Items))
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]ProxmoxMachineTemplate, len(*in))
+		for i := range *in {
+			if err := Convert_v1alpha2_ProxmoxMachineTemplate_To_v1alpha1_ProxmoxMachineTemplate(&(*in)[i], &(*out)[i], s); err != nil {
+				return err
+			}
+		}
+	} else {
+		out.Items = nil
+	}
 	return nil
 }
 

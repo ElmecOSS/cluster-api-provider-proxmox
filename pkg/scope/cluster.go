@@ -21,7 +21,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-
 	"net/http"
 	"slices"
 	"strings"
@@ -39,7 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	infrav2alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
+	infrav1alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/internal/tlshelper"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/kubernetes/ipam"
 	capmox "github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox"
@@ -51,8 +50,8 @@ type ClusterScopeParams struct {
 	Client         client.Client
 	Logger         *logr.Logger
 	Cluster        *clusterv1.Cluster
-	ProxmoxCluster *infrav2alpha2.ProxmoxCluster
-	ProxmoxClient  map[string]capmox.Client
+	ProxmoxCluster *infrav1alpha2.ProxmoxCluster
+	ProxmoxClient  capmox.Client
 	ControllerName string
 	IPAMHelper     *ipam.Helper
 }
@@ -64,13 +63,19 @@ type ClusterScope struct {
 	patchHelper *patch.Helper
 
 	Cluster        *clusterv1.Cluster
-	ProxmoxCluster *infrav2alpha2.ProxmoxCluster
+	ProxmoxCluster *infrav1alpha2.ProxmoxCluster
 
-	// Map of instance name to proxmox client for MultiInstance mode
-	ProxmoxClients map[string]capmox.Client
-
+	ProxmoxClient  capmox.Client
 	controllerName string
-	IPAMHelper     *ipam.Helper
+
+	IPAMHelper *ipam.Helper
+}
+
+type ProxmoxCredentials struct {
+	Token       string
+	TokenSecret string
+	URL         string
+	HTTPClient  *http.Client
 }
 
 // NewClusterScope creates a new Scope from the supplied parameters.
@@ -99,7 +104,7 @@ func NewClusterScope(params ClusterScopeParams) (*ClusterScope, error) {
 		Cluster:        params.Cluster,
 		ProxmoxCluster: params.ProxmoxCluster,
 		controllerName: params.ControllerName,
-		ProxmoxClients: params.ProxmoxClient,
+		ProxmoxClient:  params.ProxmoxClient,
 		IPAMHelper:     params.IPAMHelper,
 	}
 
@@ -110,8 +115,8 @@ func NewClusterScope(params ClusterScopeParams) (*ClusterScope, error) {
 
 	clusterScope.patchHelper = helper
 
-	if clusterScope.ProxmoxClients == nil {
-		if clusterScope.ProxmoxCluster.Spec.CredentialsRef == nil {
+	if clusterScope.ProxmoxClient == nil {
+		if clusterScope.ProxmoxCluster.Spec.CredentialsRef == nil && clusterScope.ProxmoxCluster.Spec.Settings.Mode == infrav1alpha2.DefaultMode {
 			// Fail the cluster if no credentials found.
 			// set failure reason
 			clusterScope.ProxmoxCluster.Status.FailureMessage = ptr.To("No credentials found, ProxmoxCluster missing credentialsRef")
@@ -127,103 +132,83 @@ func NewClusterScope(params ClusterScopeParams) (*ClusterScope, error) {
 		if err != nil {
 			return nil, errors.Wrap(err, "Unable to initialize ProxmoxClient")
 		}
-		clusterScope.ProxmoxClients = pmoxClient
+		clusterScope.ProxmoxClient = pmoxClient
 	}
 
 	return clusterScope, nil
 }
 
-func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (map[string]capmox.Client, error) {
-	// Determine which credentials to use based on mode
-	mode := s.ProxmoxCluster.Spec.Settings.Mode
-
-	// Initialize the instance clients map
-	s.ProxmoxClients = make(map[string]capmox.Client)
-
-	// First create the main client (for backward compatibility)
-	var prxClient capmox.Client
-	var prxClientErr error
-
-	switch mode {
-	case infrav2alpha2.DefaultMode, infrav2alpha2.SingleInstanceMode, "":
-		// Use the cluster-level credentials for main client
-		if s.ProxmoxCluster.Spec.Settings.Instances[0].CredentialsRef != nil {
-			// If the first instance has credentials, use it
-			prxClient, prxClientErr = s.createClientFromCredentialsRef(ctx, s.ProxmoxCluster.Spec.Settings.Instances[0].CredentialsRef)
-		} else {
-			// Otherwise, use the cluster-level credentials
-			if s.ProxmoxCluster.Spec.CredentialsRef == nil {
-				s.ProxmoxCluster.Status.FailureMessage = ptr.To("No valid credentials found in ProxmoxCluster.Spec.CredentialsRef")
-				s.ProxmoxCluster.Status.FailureReason = ptr.To(clustererrors.InvalidConfigurationClusterError)
-
-				if err := s.Close(); err != nil {
-					return nil, err
-				}
-				return nil, errors.New("no valid credentials found for Proxmox client")
-			}
-		}
-		prxClient, prxClientErr = s.createClientFromCredentialsRef(ctx, s.ProxmoxCluster.Spec.CredentialsRef)
-		s.ProxmoxClients[s.ProxmoxCluster.Name] = prxClient
-	case infrav2alpha2.MultiInstanceMode:
-		// For multi-instance mode, create a client for each instance with credentials
-		instanceWithClient := false
-
-		for _, instance := range s.ProxmoxCluster.Spec.Settings.Instances {
-			if instance.CredentialsRef != nil {
-				clientPrx, err := s.createClientFromCredentialsRef(ctx, instance.CredentialsRef)
-				if err != nil {
-					s.Error(err, "Failed to create client for instance", "instance", instance.Name)
-					continue
-				}
-
-				// Store the client for this instance
-				s.ProxmoxClients[instance.Name] = clientPrx
-
-				if !instanceWithClient {
-					instanceWithClient = true
-				}
-			}
-		}
-		// If no instance had valid credentials, fail the clusters
-		if !instanceWithClient {
-			s.ProxmoxCluster.Status.FailureMessage = ptr.To("No valid credentials found in any instance")
-			s.ProxmoxCluster.Status.FailureReason = ptr.To(clustererrors.InvalidConfigurationClusterError)
-
-			if err := s.Close(); err != nil {
-				return nil, err
-			}
-			return nil, errors.New("no valid credentials found for Proxmox client in any instance")
-		}
+func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (capmox.Client, error) {
+	// get the credentials secret
+	if s.ProxmoxCluster.Spec.Settings.Mode == infrav1alpha2.DefaultMode {
+		return s.setupDefaultProxmoxCluster(ctx)
 	}
-
-	return s.ProxmoxClients, prxClientErr
+	var (
+		urls          []string
+		instanceNames []string
+		options       []proxmox.Option
+	)
+	for i, instance := range s.ProxmoxCluster.Spec.Settings.Instances {
+		secret := corev1.Secret{}
+		namespace := s.ProxmoxCluster.Spec.Settings.Instances[i].CredentialsRef.Namespace
+		if len(namespace) == 0 {
+			namespace = s.ProxmoxCluster.GetNamespace()
+		}
+		err := s.client.Get(ctx, client.ObjectKey{
+			Namespace: namespace,
+			Name:      s.ProxmoxCluster.Spec.Settings.Instances[i].CredentialsRef.Name,
+		}, &secret)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				// set failure reason
+				s.ProxmoxCluster.Status.FailureMessage = ptr.To("credentials secret not found, instance: " + instance.Name)
+				s.ProxmoxCluster.Status.FailureReason = ptr.To(clustererrors.InvalidConfigurationClusterError)
+			}
+			return nil, errors.Wrap(err, "failed to get credentials secret")
+		}
+		var prxCred *ProxmoxCredentials
+		prxCred, err = s.extractSecretData(secret)
+		if err != nil {
+			return nil, err
+		}
+		urls = append(urls, prxCred.URL)
+		options = append(options, proxmox.WithHTTPClient(prxCred.HTTPClient),
+			proxmox.WithAPIToken(prxCred.Token, prxCred.TokenSecret))
+		instanceNames = append(instanceNames, instance.Name)
+	}
+	return goproxmox.NewAPIClientForMultiInstances(ctx, *s.Logger, urls, instanceNames, options)
 }
 
-// Helper method to create a client from credentials reference
-func (s *ClusterScope) createClientFromCredentialsRef(ctx context.Context, credRef *corev1.SecretReference) (capmox.Client, error) {
-	if credRef == nil {
-		return nil, errors.New("credentials reference is nil")
-	}
-
-	// Get the credentials secret
+func (s *ClusterScope) setupDefaultProxmoxCluster(ctx context.Context) (capmox.Client, error) {
 	secret := corev1.Secret{}
-	namespace := credRef.Namespace
+	namespace := s.ProxmoxCluster.Spec.CredentialsRef.Namespace
 	if len(namespace) == 0 {
 		namespace = s.ProxmoxCluster.GetNamespace()
 	}
-
 	err := s.client.Get(ctx, client.ObjectKey{
 		Namespace: namespace,
-		Name:      credRef.Name,
+		Name:      s.ProxmoxCluster.Spec.CredentialsRef.Name,
 	}, &secret)
-
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, errors.Wrap(err, "credentials secret not found")
+			// set failure reason
+			s.ProxmoxCluster.Status.FailureMessage = ptr.To("credentials secret not found")
+			s.ProxmoxCluster.Status.FailureReason = ptr.To(clustererrors.InvalidConfigurationClusterError)
 		}
 		return nil, errors.Wrap(err, "failed to get credentials secret")
 	}
+	var prxCred *ProxmoxCredentials
+	prxCred, err = s.extractSecretData(secret)
+	if err != nil {
+		return nil, err
+	}
+	return goproxmox.NewAPIClient(ctx, *s.Logger, prxCred.URL,
+		proxmox.WithHTTPClient(prxCred.HTTPClient),
+		proxmox.WithAPIToken(prxCred.Token, prxCred.TokenSecret),
+	)
+}
 
+func (s *ClusterScope) extractSecretData(secret corev1.Secret) (*ProxmoxCredentials, error) {
 	token := string(secret.Data["token"])
 	tokenSecret := string(secret.Data["secret"])
 	url := string(secret.Data["url"])
@@ -238,111 +223,24 @@ func (s *ClusterScope) createClientFromCredentialsRef(ctx context.Context, credR
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{
+			// When "insecure" is unset we retain the pre-v0.7 behavior of
+			// setting the connection insecure. If it is set we compare
+			// against YAML true-ish values.
+			//
+			//#nosec:G402 // Intended to enable insecure mode for unknown CAs
 			InsecureSkipVerify: !tlsInsecureSet || slices.Contains([]string{"1", "on", "true", "yes", "y"}, strings.ToLower(string(tlsInsecure))),
 			RootCAs:            rootCerts,
 		},
 	}
 
 	httpClient := &http.Client{Transport: tr}
-	return goproxmox.NewAPIClient(ctx, *s.Logger, url,
-		proxmox.WithHTTPClient(httpClient),
-		proxmox.WithAPIToken(token, tokenSecret),
-	)
+	return &ProxmoxCredentials{
+		Token:       token,
+		TokenSecret: tokenSecret,
+		URL:         url,
+		HTTPClient:  httpClient,
+	}, nil
 }
-
-// GetClientForInstance returns the client for a specific instance
-func (s *ClusterScope) GetClientForInstance(instanceName string) capmox.Client {
-	if s.ProxmoxCluster.Spec.Settings.Mode != infrav2alpha2.MultiInstanceMode {
-		return s.ProxmoxClients[instanceName]
-	}
-
-	if clientPrx, ok := s.ProxmoxClients[instanceName]; ok {
-		return clientPrx
-	}
-
-	// Fall back to the main client if no specific client is found
-	return s.ProxmoxClients[s.ProxmoxCluster.Name]
-}
-
-// GetClientForNode returns the client responsible for a specific Proxmox node
-func (s *ClusterScope) GetClientForNode(nodeName string) capmox.Client {
-	if s.ProxmoxCluster.Spec.Settings.Mode != infrav2alpha2.MultiInstanceMode {
-		return s.ProxmoxClients[s.ProxmoxCluster.Name]
-	}
-
-	// Find which instance this node belongs to
-	for _, instance := range s.ProxmoxCluster.Spec.Settings.Instances {
-		if slices.Contains(instance.Nodes, nodeName) {
-			if clientPrx, ok := s.ProxmoxClients[instance.Name]; ok {
-				return clientPrx
-			}
-		}
-	}
-
-	// Fall back to the main client
-	return s.ProxmoxClients[s.ProxmoxCluster.Name]
-}
-
-// GetInstanceForNode returns the instance a node belongs to
-func (s *ClusterScope) GetInstanceForNode(nodeName string) string {
-	for _, instance := range s.ProxmoxCluster.Spec.Settings.Instances {
-		if slices.Contains(instance.Nodes, nodeName) {
-			return instance.Name
-		}
-	}
-	return ""
-}
-
-//func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (capmox.Client, error) {
-//	// get the credentials secret
-//	secret := corev1.Secret{}
-//	namespace := s.ProxmoxCluster.Spec.CredentialsRef.Namespace
-//	if len(namespace) == 0 {
-//		namespace = s.ProxmoxCluster.GetNamespace()
-//	}
-//	err := s.client.Get(ctx, client.ObjectKey{
-//		Namespace: namespace,
-//		Name:      s.ProxmoxCluster.Spec.CredentialsRef.Name,
-//	}, &secret)
-//	if err != nil {
-//		if apierrors.IsNotFound(err) {
-//			// set failure reason
-//			s.ProxmoxCluster.Status.FailureMessage = ptr.To("credentials secret not found")
-//			s.ProxmoxCluster.Status.FailureReason = ptr.To(clustererrors.InvalidConfigurationClusterError)
-//		}
-//		return nil, errors.Wrap(err, "failed to get credentials secret")
-//	}
-//
-//	token := string(secret.Data["token"])
-//	tokenSecret := string(secret.Data["secret"])
-//	url := string(secret.Data["url"])
-//
-//	tlsInsecure, tlsInsecureSet := secret.Data["insecure"]
-//	tlsRootCA := secret.Data["root_ca"]
-//
-//	rootCerts, err := tlshelper.SystemRootsWithCert(tlsRootCA)
-//	if err != nil {
-//		return nil, fmt.Errorf("loading cert pool: %w", err)
-//	}
-//
-//	tr := &http.Transport{
-//		TLSClientConfig: &tls.Config{
-//			// When "insecure" is unset we retain the pre-v0.7 behavior of
-//			// setting the connection insecure. If it is set we compare
-//			// against YAML true-ish values.
-//			//
-//			//#nosec:G402 // Intended to enable insecure mode for unknown CAs
-//			InsecureSkipVerify: !tlsInsecureSet || slices.Contains([]string{"1", "on", "true", "yes", "y"}, strings.ToLower(string(tlsInsecure))),
-//			RootCAs:            rootCerts,
-//		},
-//	}
-//
-//	httpClient := &http.Client{Transport: tr}
-//	return goproxmox.NewAPIClient(ctx, *s.Logger, url,
-//		proxmox.WithHTTPClient(httpClient),
-//		proxmox.WithAPIToken(token, tokenSecret),
-//	)
-//}
 
 // Name returns the CAPI cluster name.
 func (s *ClusterScope) Name() string {
@@ -370,7 +268,7 @@ func (s *ClusterScope) PatchObject() error {
 	// always update the readyCondition.
 	conditions.SetSummary(s.ProxmoxCluster,
 		conditions.WithConditions(
-			infrav2alpha2.ProxmoxClusterReady,
+			infrav1alpha2.ProxmoxClusterReady,
 		),
 	)
 
@@ -378,8 +276,8 @@ func (s *ClusterScope) PatchObject() error {
 }
 
 // ListProxmoxMachinesForCluster returns all the ProxmoxMachines that belong to this cluster.
-func (s *ClusterScope) ListProxmoxMachinesForCluster(ctx context.Context) ([]infrav2alpha2.ProxmoxMachine, error) {
-	var machineList infrav2alpha2.ProxmoxMachineList
+func (s *ClusterScope) ListProxmoxMachinesForCluster(ctx context.Context) ([]infrav1alpha2.ProxmoxMachine, error) {
+	var machineList infrav1alpha2.ProxmoxMachineList
 
 	err := s.client.List(ctx, &machineList, client.InNamespace(s.Namespace()), client.MatchingLabels{
 		clusterv1.ClusterNameLabel: s.Name(),

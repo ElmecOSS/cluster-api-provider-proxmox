@@ -18,7 +18,7 @@ package vmservice
 
 import (
 	"context"
-	infrav2alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
+	infrav1alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,7 +36,7 @@ func TestReconcilePowerState_MissingIPAddress(t *testing.T) {
 func TestReconcilePowerState_SetTaskRef(t *testing.T) {
 	ctx := context.TODO()
 	machineScope, proxmoxClient, _ := setupReconcilerTest(t)
-	machineScope.ProxmoxMachine.Status.IPAddresses = map[string]infrav2alpha2.IPAddress{infrav2alpha2.DefaultNetworkDevice: {IPV4: "10.10.10.10"}}
+	machineScope.ProxmoxMachine.Status.IPAddresses = map[string]infrav1alpha2.IPAddress{infrav1alpha2.DefaultNetworkDevice: {IPV4: "10.10.10.10"}}
 
 	vm := newStoppedVM()
 	task := newTask()

@@ -25,7 +25,7 @@ func (_m *MockClient) EXPECT() *MockClient_Expecter {
 }
 
 // CheckID provides a mock function with given fields: ctx, vmID
-func (_m *MockClient) CheckID(ctx context.Context, vmID int64) (bool, error) {
+func (_m *MockClient) CheckID(ctx context.Context, vmID int64, _ string) (bool, error) {
 	ret := _m.Called(ctx, vmID)
 
 	if len(ret) == 0 {
@@ -82,7 +82,7 @@ func (_c *MockClient_CheckID_Call) RunAndReturn(run func(context.Context, int64)
 }
 
 // CloneVM provides a mock function with given fields: ctx, templateID, clone
-func (_m *MockClient) CloneVM(ctx context.Context, templateID int, clone proxmox.VMCloneRequest) (proxmox.VMCloneResponse, error) {
+func (_m *MockClient) CloneVM(ctx context.Context, templateID int, clone proxmox.VMCloneRequest, _ string) (proxmox.VMCloneResponse, error) {
 	ret := _m.Called(ctx, templateID, clone)
 
 	if len(ret) == 0 {
@@ -271,7 +271,7 @@ func (_c *MockClient_ConfigureVM_Call) RunAndReturn(run func(context.Context, *g
 }
 
 // DeleteVM provides a mock function with given fields: ctx, nodeName, vmID
-func (_m *MockClient) DeleteVM(ctx context.Context, nodeName string, vmID int64) (*go_proxmox.Task, error) {
+func (_m *MockClient) DeleteVM(ctx context.Context, nodeName string, vmID int64, _ string) (*go_proxmox.Task, error) {
 	ret := _m.Called(ctx, nodeName, vmID)
 
 	if len(ret) == 0 {
@@ -331,7 +331,7 @@ func (_c *MockClient_DeleteVM_Call) RunAndReturn(run func(context.Context, strin
 }
 
 // FindVMResource provides a mock function with given fields: ctx, vmID
-func (_m *MockClient) FindVMResource(ctx context.Context, vmID uint64) (*go_proxmox.ClusterResource, error) {
+func (_m *MockClient) FindVMResource(ctx context.Context, vmID uint64, _ string) (*go_proxmox.ClusterResource, error) {
 	ret := _m.Called(ctx, vmID)
 
 	if len(ret) == 0 {
@@ -390,7 +390,7 @@ func (_c *MockClient_FindVMResource_Call) RunAndReturn(run func(context.Context,
 }
 
 // FindVMTemplateByTags provides a mock function with given fields: ctx, templateTags
-func (_m *MockClient) FindVMTemplateByTags(ctx context.Context, templateTags []string) (string, int32, error) {
+func (_m *MockClient) FindVMTemplateByTags(ctx context.Context, templateTags []string, _ string) (string, int32, error) {
 	ret := _m.Called(ctx, templateTags)
 
 	if len(ret) == 0 {
@@ -454,7 +454,7 @@ func (_c *MockClient_FindVMTemplateByTags_Call) RunAndReturn(run func(context.Co
 }
 
 // GetReservableMemoryBytes provides a mock function with given fields: ctx, nodeName, nodeMemoryAdjustment
-func (_m *MockClient) GetReservableMemoryBytes(ctx context.Context, nodeName string, nodeMemoryAdjustment uint64) (uint64, error) {
+func (_m *MockClient) GetReservableMemoryBytes(ctx context.Context, nodeName string, nodeMemoryAdjustment uint64, _ string) (uint64, error) {
 	ret := _m.Called(ctx, nodeName, nodeMemoryAdjustment)
 
 	if len(ret) == 0 {
@@ -512,7 +512,7 @@ func (_c *MockClient_GetReservableMemoryBytes_Call) RunAndReturn(run func(contex
 }
 
 // GetTask provides a mock function with given fields: ctx, upID
-func (_m *MockClient) GetTask(ctx context.Context, upID string) (*go_proxmox.Task, error) {
+func (_m *MockClient) GetTask(ctx context.Context, upID string, _ string) (*go_proxmox.Task, error) {
 	ret := _m.Called(ctx, upID)
 
 	if len(ret) == 0 {
@@ -571,7 +571,7 @@ func (_c *MockClient_GetTask_Call) RunAndReturn(run func(context.Context, string
 }
 
 // GetVM provides a mock function with given fields: ctx, nodeName, vmID
-func (_m *MockClient) GetVM(ctx context.Context, nodeName string, vmID int64) (*go_proxmox.VirtualMachine, error) {
+func (_m *MockClient) GetVM(ctx context.Context, nodeName string, vmID int64, _ string) (*go_proxmox.VirtualMachine, error) {
 	ret := _m.Called(ctx, nodeName, vmID)
 
 	if len(ret) == 0 {

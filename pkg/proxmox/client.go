@@ -23,8 +23,6 @@ import (
 	"github.com/luthermonson/go-proxmox"
 )
 
-// TODO mockclient
-
 // Client Global Proxmox client interface.
 type Client interface {
 	CloneVM(ctx context.Context, templateID int, clone VMCloneRequest, instanceName string) (VMCloneResponse, error)

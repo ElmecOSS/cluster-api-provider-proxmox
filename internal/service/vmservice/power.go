@@ -19,7 +19,7 @@ package vmservice
 import (
 	"context"
 	"fmt"
-	infrav2alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
+	infrav1alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 
 	"github.com/luthermonson/go-proxmox"
 	"k8s.io/utils/ptr"
@@ -39,11 +39,11 @@ func reconcilePowerState(ctx context.Context, machineScope *scope.MachineScope) 
 	}
 
 	machineScope.V(4).Info("ensuring machine is started")
-	conditions.MarkFalse(machineScope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition, infrav2alpha2.PoweringOnReason, clusterv1.ConditionSeverityInfo, "")
+	conditions.MarkFalse(machineScope.ProxmoxMachine, infrav1alpha2.VMProvisionedCondition, infrav1alpha2.PoweringOnReason, clusterv1.ConditionSeverityInfo, "")
 
 	t, err := startVirtualMachine(ctx, machineScope.InfraCluster.ProxmoxClient, machineScope.VirtualMachine)
 	if err != nil {
-		conditions.MarkFalse(machineScope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition, infrav2alpha2.PoweringOnFailedReason, clusterv1.ConditionSeverityInfo, "%s", err)
+		conditions.MarkFalse(machineScope.ProxmoxMachine, infrav1alpha2.VMProvisionedCondition, infrav1alpha2.PoweringOnFailedReason, clusterv1.ConditionSeverityInfo, "%s", err)
 		return false, err
 	}
 

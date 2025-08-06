@@ -47,8 +47,13 @@ func (err InsufficientMemoryError) Error() string {
 // It requires the machine's ProxmoxCluster to have at least 1 allowed node.
 func ScheduleVM(ctx context.Context, machineScope *scope.MachineScope) (string, error) {
 	client := machineScope.InfraCluster.ProxmoxClient
-	// Use the default allowed nodes from the ProxmoxCluster.
-	allowedNodes := machineScope.InfraCluster.ProxmoxCluster.Spec.AllowedNodes
+	var instanceName string
+
+	if machineScope.InfraCluster.ProxmoxCluster.Spec.Settings.Mode != infrav2.DefaultMode {
+		instanceName = machineScope.ProxmoxMachine.GetInstance()
+	}
+	nodes := machineScope.InfraCluster.ProxmoxCluster.GetNodesForInstance(instanceName)
+
 	schedulerHints := machineScope.InfraCluster.ProxmoxCluster.Spec.SchedulerHints
 	locations := machineScope.InfraCluster.ProxmoxCluster.Status.NodeLocations.Workers
 	if util.IsControlPlaneMachine(machineScope.Machine) {
@@ -57,10 +62,10 @@ func ScheduleVM(ctx context.Context, machineScope *scope.MachineScope) (string, 
 
 	// If ProxmoxMachine defines allowedNodes use them instead
 	if len(machineScope.ProxmoxMachine.Spec.AllowedNodes) > 0 {
-		allowedNodes = machineScope.ProxmoxMachine.Spec.AllowedNodes
+		nodes = machineScope.ProxmoxMachine.Spec.AllowedNodes
 	}
 
-	return selectNode(ctx, client, machineScope.ProxmoxMachine, locations, allowedNodes, schedulerHints)
+	return selectNode(ctx, client, machineScope.ProxmoxMachine, locations, nodes, schedulerHints)
 }
 
 func selectNode(
@@ -71,9 +76,10 @@ func selectNode(
 	allowedNodes []string,
 	schedulerHints *infrav2.SchedulerHints,
 ) (string, error) {
+	instanceName := machine.GetInstance()
 	byMemory := make(sortByAvailableMemory, len(allowedNodes))
 	for i, nodeName := range allowedNodes {
-		mem, err := client.GetReservableMemoryBytes(ctx, nodeName, schedulerHints.GetMemoryAdjustment())
+		mem, err := client.GetReservableMemoryBytes(ctx, nodeName, schedulerHints.GetMemoryAdjustment(), instanceName)
 		if err != nil {
 			return "", err
 		}
@@ -128,7 +134,7 @@ func selectNode(
 }
 
 type resourceClient interface {
-	GetReservableMemoryBytes(context.Context, string, uint64) (uint64, error)
+	GetReservableMemoryBytes(context.Context, string, uint64, string) (uint64, error)
 }
 
 type nodeInfo struct {

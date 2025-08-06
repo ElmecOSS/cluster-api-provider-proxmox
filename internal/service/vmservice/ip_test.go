@@ -18,7 +18,7 @@ package vmservice
 
 import (
 	"context"
-	infrav2alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
+	infrav1alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,27 +33,27 @@ func TestReconcileIPAddresses_CreateDefaultClaim(t *testing.T) {
 	requeue, err := reconcileIPAddresses(context.Background(), machineScope)
 	require.NoError(t, err)
 	require.True(t, requeue)
-	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition)
+	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav1alpha2.VMProvisionedCondition)
 }
 
 func TestReconcileIPAddresses_CreateAdditionalClaim(t *testing.T) {
 	machineScope, _, kubeClient := setupReconcilerTest(t)
-	machineScope.ProxmoxMachine.Spec.Network = &infrav2alpha2.NetworkSpec{
-		Default: &infrav2alpha2.NetworkDevice{Bridge: "vmbr0"},
-		AdditionalDevices: []infrav2alpha2.AdditionalNetworkDevice{
-			{Name: "net1", NetworkDevice: infrav2alpha2.NetworkDevice{IPPoolConfig: infrav2alpha2.IPPoolConfig{IPv4PoolRef: &corev1.TypedLocalObjectReference{Kind: "InClusterIPPool", Name: "custom"}}}},
+	machineScope.ProxmoxMachine.Spec.Network = &infrav1alpha2.NetworkSpec{
+		Default: &infrav1alpha2.NetworkDevice{Bridge: "vmbr0"},
+		AdditionalDevices: []infrav1alpha2.AdditionalNetworkDevice{
+			{Name: "net1", NetworkDevice: infrav1alpha2.NetworkDevice{IPPoolConfig: infrav1alpha2.IPPoolConfig{IPv4PoolRef: &corev1.TypedLocalObjectReference{Kind: "InClusterIPPool", Name: "custom"}}}},
 		},
 	}
 	vm := newStoppedVM()
 	vm.VirtualMachineConfig.Tags = ipTag
 	machineScope.SetVirtualMachine(vm)
-	createIP4AddressResource(t, kubeClient, machineScope, infrav2alpha2.DefaultNetworkDevice, "10.10.10.10")
+	createIP4AddressResource(t, kubeClient, machineScope, infrav1alpha2.DefaultNetworkDevice, "10.10.10.10")
 	createIPPools(t, kubeClient, machineScope)
 
 	requeue, err := reconcileIPAddresses(context.Background(), machineScope)
 	require.NoError(t, err)
 	require.True(t, requeue)
-	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition)
+	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav1alpha2.VMProvisionedCondition)
 }
 
 func TestReconcileIPAddresses_AddIPTag(t *testing.T) {
@@ -61,47 +61,47 @@ func TestReconcileIPAddresses_AddIPTag(t *testing.T) {
 	vm := newStoppedVM()
 	task := newTask()
 	machineScope.SetVirtualMachine(vm)
-	createIP4AddressResource(t, kubeClient, machineScope, infrav2alpha2.DefaultNetworkDevice, "10.10.10.10")
+	createIP4AddressResource(t, kubeClient, machineScope, infrav1alpha2.DefaultNetworkDevice, "10.10.10.10")
 
 	proxmoxClient.EXPECT().TagVM(context.Background(), vm, ipTag).Return(task, nil).Once()
 
 	requeue, err := reconcileIPAddresses(context.Background(), machineScope)
 	require.NoError(t, err)
 	require.True(t, requeue)
-	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition)
+	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav1alpha2.VMProvisionedCondition)
 }
 
 func TestReconcileIPAddresses_SetIPAddresses(t *testing.T) {
 	machineScope, _, kubeClient := setupReconcilerTest(t)
-	machineScope.ProxmoxMachine.Spec.Network = &infrav2alpha2.NetworkSpec{
-		Default: &infrav2alpha2.NetworkDevice{Bridge: "vmbr0"},
-		AdditionalDevices: []infrav2alpha2.AdditionalNetworkDevice{
+	machineScope.ProxmoxMachine.Spec.Network = &infrav1alpha2.NetworkSpec{
+		Default: &infrav1alpha2.NetworkDevice{Bridge: "vmbr0"},
+		AdditionalDevices: []infrav1alpha2.AdditionalNetworkDevice{
 			{Name: "net1",
-				NetworkDevice: infrav2alpha2.NetworkDevice{
-					IPPoolConfig: infrav2alpha2.IPPoolConfig{IPv4PoolRef: &corev1.TypedLocalObjectReference{Kind: "GlobalInClusterIPPool", Name: "custom"}},
+				NetworkDevice: infrav1alpha2.NetworkDevice{
+					IPPoolConfig: infrav1alpha2.IPPoolConfig{IPv4PoolRef: &corev1.TypedLocalObjectReference{Kind: "GlobalInClusterIPPool", Name: "custom"}},
 				}},
 		},
 	}
 	vm := newStoppedVM()
 	vm.VirtualMachineConfig.Tags = ipTag
 	machineScope.SetVirtualMachine(vm)
-	createIP4AddressResource(t, kubeClient, machineScope, infrav2alpha2.DefaultNetworkDevice, "10.10.10.10")
+	createIP4AddressResource(t, kubeClient, machineScope, infrav1alpha2.DefaultNetworkDevice, "10.10.10.10")
 	createIP4AddressResource(t, kubeClient, machineScope, "net1", "10.100.10.10")
 	createIPPools(t, kubeClient, machineScope)
 
 	requeue, err := reconcileIPAddresses(context.Background(), machineScope)
 	require.NoError(t, err)
 	require.True(t, requeue)
-	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition)
+	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav1alpha2.VMProvisionedCondition)
 }
 
 func TestReconcileIPAddresses_MultipleDevices(t *testing.T) {
 	machineScope, _, kubeClient := setupReconcilerTest(t)
-	machineScope.ProxmoxMachine.Spec.Network = &infrav2alpha2.NetworkSpec{
-		Default: &infrav2alpha2.NetworkDevice{Bridge: "vmbr0"},
-		AdditionalDevices: []infrav2alpha2.AdditionalNetworkDevice{
-			{Name: "net1", NetworkDevice: infrav2alpha2.NetworkDevice{IPPoolConfig: infrav2alpha2.IPPoolConfig{IPv4PoolRef: &corev1.TypedLocalObjectReference{Kind: "GlobalInClusterIPPool", Name: "ipv4pool"}}}},
-			{Name: "net2", NetworkDevice: infrav2alpha2.NetworkDevice{IPPoolConfig: infrav2alpha2.IPPoolConfig{IPv6PoolRef: &corev1.TypedLocalObjectReference{Kind: "GlobalInClusterIPPool", Name: "ipv6pool"}}}},
+	machineScope.ProxmoxMachine.Spec.Network = &infrav1alpha2.NetworkSpec{
+		Default: &infrav1alpha2.NetworkDevice{Bridge: "vmbr0"},
+		AdditionalDevices: []infrav1alpha2.AdditionalNetworkDevice{
+			{Name: "net1", NetworkDevice: infrav1alpha2.NetworkDevice{IPPoolConfig: infrav1alpha2.IPPoolConfig{IPv4PoolRef: &corev1.TypedLocalObjectReference{Kind: "GlobalInClusterIPPool", Name: "ipv4pool"}}}},
+			{Name: "net2", NetworkDevice: infrav1alpha2.NetworkDevice{IPPoolConfig: infrav1alpha2.IPPoolConfig{IPv6PoolRef: &corev1.TypedLocalObjectReference{Kind: "GlobalInClusterIPPool", Name: "ipv6pool"}}}},
 		},
 	}
 
@@ -109,7 +109,7 @@ func TestReconcileIPAddresses_MultipleDevices(t *testing.T) {
 	vm.VirtualMachineConfig.Tags = ipTag
 	machineScope.SetVirtualMachine(vm)
 
-	createIP4AddressResource(t, kubeClient, machineScope, infrav2alpha2.DefaultNetworkDevice, "10.10.10.10")
+	createIP4AddressResource(t, kubeClient, machineScope, infrav1alpha2.DefaultNetworkDevice, "10.10.10.10")
 	createIP4AddressResource(t, kubeClient, machineScope, "net1", "10.100.10.10")
 	createIP6AddressResource(t, kubeClient, machineScope, "net2", "fe80::ffee")
 	createIPPools(t, kubeClient, machineScope)
@@ -119,65 +119,65 @@ func TestReconcileIPAddresses_MultipleDevices(t *testing.T) {
 	require.True(t, requeue)
 	require.Len(t, machineScope.ProxmoxMachine.Status.IPAddresses, 3)
 
-	expected := map[string]infrav2alpha2.IPAddress{
+	expected := map[string]infrav1alpha2.IPAddress{
 		"net0": {IPV4: "10.10.10.10"},
 		"net1": {IPV4: "10.100.10.10"},
 		"net2": {IPV6: "fe80::ffee"},
 	}
 
 	require.Equal(t, expected, machineScope.ProxmoxMachine.Status.IPAddresses)
-	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition)
+	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav1alpha2.VMProvisionedCondition)
 }
 
 func TestReconcileIPAddresses_IPV6(t *testing.T) {
 	machineScope, _, kubeClient := setupReconcilerTest(t)
-	machineScope.InfraCluster.ProxmoxCluster.Spec.IPv6Config = &infrav2alpha2.IPConfigSpec{
+	machineScope.InfraCluster.ProxmoxCluster.Spec.IPv6Config = &infrav1alpha2.IPConfigSpec{
 		Addresses: []string{"fe80::/64"},
 		Prefix:    64,
 		Gateway:   "fe80::1",
 	}
-	machineScope.ProxmoxMachine.Spec.Network = &infrav2alpha2.NetworkSpec{
-		Default: &infrav2alpha2.NetworkDevice{Bridge: "vmbr0"},
-		AdditionalDevices: []infrav2alpha2.AdditionalNetworkDevice{
-			{Name: "net1", NetworkDevice: infrav2alpha2.NetworkDevice{IPPoolConfig: infrav2alpha2.IPPoolConfig{IPv4PoolRef: &corev1.TypedLocalObjectReference{Kind: "GlobalInClusterIPPool", Name: "custom"}}}},
+	machineScope.ProxmoxMachine.Spec.Network = &infrav1alpha2.NetworkSpec{
+		Default: &infrav1alpha2.NetworkDevice{Bridge: "vmbr0"},
+		AdditionalDevices: []infrav1alpha2.AdditionalNetworkDevice{
+			{Name: "net1", NetworkDevice: infrav1alpha2.NetworkDevice{IPPoolConfig: infrav1alpha2.IPPoolConfig{IPv4PoolRef: &corev1.TypedLocalObjectReference{Kind: "GlobalInClusterIPPool", Name: "custom"}}}},
 		},
 	}
 	vm := newStoppedVM()
 	vm.VirtualMachineConfig.Tags = ipTag
 	machineScope.SetVirtualMachine(vm)
-	createIP4AddressResource(t, kubeClient, machineScope, infrav2alpha2.DefaultNetworkDevice, "10.10.10.10")
-	createIP6AddressResource(t, kubeClient, machineScope, infrav2alpha2.DefaultNetworkDevice, "fe80::1")
+	createIP4AddressResource(t, kubeClient, machineScope, infrav1alpha2.DefaultNetworkDevice, "10.10.10.10")
+	createIP6AddressResource(t, kubeClient, machineScope, infrav1alpha2.DefaultNetworkDevice, "fe80::1")
 	createIP4AddressResource(t, kubeClient, machineScope, "net1", "10.100.10.10")
 	createIPPools(t, kubeClient, machineScope)
 
 	requeue, err := reconcileIPAddresses(context.Background(), machineScope)
 	require.NoError(t, err)
 	require.True(t, requeue)
-	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition)
+	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav1alpha2.VMProvisionedCondition)
 }
 
 func TestReconcileIPAddresses_MachineIPPoolRef(t *testing.T) {
 	machineScope, _, kubeClient := setupReconcilerTest(t)
-	machineScope.ProxmoxMachine.Spec.Network = &infrav2alpha2.NetworkSpec{
-		Default: &infrav2alpha2.NetworkDevice{
-			IPPoolConfig: infrav2alpha2.IPPoolConfig{IPv4PoolRef: &corev1.TypedLocalObjectReference{Kind: "GlobalInClusterIPPool", Name: "custom-ips"}},
+	machineScope.ProxmoxMachine.Spec.Network = &infrav1alpha2.NetworkSpec{
+		Default: &infrav1alpha2.NetworkDevice{
+			IPPoolConfig: infrav1alpha2.IPPoolConfig{IPv4PoolRef: &corev1.TypedLocalObjectReference{Kind: "GlobalInClusterIPPool", Name: "custom-ips"}},
 		},
-		AdditionalDevices: []infrav2alpha2.AdditionalNetworkDevice{
+		AdditionalDevices: []infrav1alpha2.AdditionalNetworkDevice{
 			{Name: "net1",
-				NetworkDevice: infrav2alpha2.NetworkDevice{
-					IPPoolConfig: infrav2alpha2.IPPoolConfig{IPv4PoolRef: &corev1.TypedLocalObjectReference{Kind: "GlobalInClusterIPPool", Name: "custom-additional-ips"}},
+				NetworkDevice: infrav1alpha2.NetworkDevice{
+					IPPoolConfig: infrav1alpha2.IPPoolConfig{IPv4PoolRef: &corev1.TypedLocalObjectReference{Kind: "GlobalInClusterIPPool", Name: "custom-additional-ips"}},
 				}},
 		},
 	}
 	vm := newStoppedVM()
 	vm.VirtualMachineConfig.Tags = ipTag
 	machineScope.SetVirtualMachine(vm)
-	createIP4AddressResource(t, kubeClient, machineScope, infrav2alpha2.DefaultNetworkDevice, "10.10.10.10")
+	createIP4AddressResource(t, kubeClient, machineScope, infrav1alpha2.DefaultNetworkDevice, "10.10.10.10")
 	createIP4AddressResource(t, kubeClient, machineScope, "net1", "10.100.10.10")
 	createIPPools(t, kubeClient, machineScope)
 
 	requeue, err := reconcileIPAddresses(context.Background(), machineScope)
 	require.NoError(t, err)
 	require.True(t, requeue)
-	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav2alpha2.VMProvisionedCondition)
+	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav1alpha2.VMProvisionedCondition)
 }

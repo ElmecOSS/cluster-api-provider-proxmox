@@ -48,9 +48,71 @@ func Convert_v1alpha2_ProxmoxClusterSpec_To_v1alpha1_ProxmoxClusterSpec(in *v1al
 	out.SchedulerHints = (*SchedulerHints)(in.SchedulerHints)
 	out.IPv4Config = (*IPConfigSpec)(in.IPv4Config)
 	out.IPv6Config = (*IPConfigSpec)(in.IPv6Config)
-	// todo field clone
+	if in.CloneSpec != nil {
+		out.CloneSpec = &ProxmoxClusterCloneSpec{}
+		if err := Convert_v1alpha2_ProxmoxClusterCloneSpec_To_v1alpha1_ProxmoxClusterCloneSpec(in.CloneSpec, out.CloneSpec, s); err != nil {
+			return err
+		}
+	}
 	out.CredentialsRef = in.CredentialsRef
 	// Note: Settings field from v1alpha2 is not supported in v1alpha1 and will be ignored during conversion
+
+	return nil
+}
+
+func Convert_v1alpha2_ProxmoxMachineSpec_To_v1alpha1_ProxmoxMachineSpec(in *v1alpha2.ProxmoxMachineSpec, out *ProxmoxMachineSpec, s conversion_machinery.Scope) error {
+	out.VirtualMachineCloneSpec.TemplateSelector = (*TemplateSelector)(in.VirtualMachineCloneSpec.TemplateSelector)
+	out.VirtualMachineCloneSpec.SourceNode = in.VirtualMachineCloneSpec.SourceNode
+	out.VirtualMachineCloneSpec.TemplateID = in.VirtualMachineCloneSpec.TemplateID
+	out.VirtualMachineCloneSpec.Description = in.VirtualMachineCloneSpec.Description
+	out.VirtualMachineCloneSpec.Format = (*TargetFileStorageFormat)(in.VirtualMachineCloneSpec.Format)
+	out.VirtualMachineCloneSpec.Full = in.VirtualMachineCloneSpec.Full
+	out.VirtualMachineCloneSpec.Pool = in.VirtualMachineCloneSpec.Pool
+	out.VirtualMachineCloneSpec.SnapName = in.VirtualMachineCloneSpec.SnapName
+	out.VirtualMachineCloneSpec.Storage = in.VirtualMachineCloneSpec.Storage
+	out.VirtualMachineCloneSpec.Target = in.VirtualMachineCloneSpec.Target
+
+	out.ProviderID = in.ProviderID
+	out.VirtualMachineID = in.VirtualMachineID
+	out.NumSockets = in.NumSockets
+	out.NumCores = in.NumCores
+	out.MemoryMiB = in.MemoryMiB
+	out.Disks.BootVolume = (*DiskSize)(in.Disks.BootVolume)
+	out.Network.Default.Bridge = in.Network.Default.Bridge
+	out.Network.Default.Model = in.Network.Default.Model
+	out.Network.Default.MTU = MTU(in.Network.Default.MTU)
+	out.Network.Default.VLAN = in.Network.Default.VLAN
+	out.Network.Default.DNSServers = in.Network.Default.DNSServers
+	out.Network.Default.IPPoolConfig = IPPoolConfig(in.Network.Default.IPPoolConfig)
+
+	// Convert AdditionalDevices slice
+	if in.Network.AdditionalDevices != nil {
+		out.Network.AdditionalDevices = make([]AdditionalNetworkDevice, len(in.Network.AdditionalDevices))
+		for i := range in.Network.AdditionalDevices {
+			if err := Convert_v1alpha2_AdditionalNetworkDevice_To_v1alpha1_AdditionalNetworkDevice(&in.Network.AdditionalDevices[i], &out.Network.AdditionalDevices[i], s); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Convert VRFs slice
+	if in.Network.VirtualNetworkDevices.VRFs != nil {
+		out.Network.VirtualNetworkDevices.VRFs = make([]VRFDevice, len(in.Network.VirtualNetworkDevices.VRFs))
+		for i := range in.Network.VirtualNetworkDevices.VRFs {
+			if err := Convert_v1alpha2_VRFDevice_To_v1alpha1_VRFDevice(&in.Network.VirtualNetworkDevices.VRFs[i], &out.Network.VirtualNetworkDevices.VRFs[i], s); err != nil {
+				return err
+			}
+		}
+	}
+
+	out.VMIDRange = (*VMIDRange)(in.VMIDRange)
+	out.Checks = (*ProxmoxMachineChecks)(in.Checks)
+	out.MetadataSettings = (*MetadataSettings)(in.MetadataSettings)
+	out.AllowedNodes = in.AllowedNodes
+	out.Tags = in.Tags
+
+	// todo template selector
+	// instance is not supported in v1alpha1, so we ignore it
 
 	return nil
 }

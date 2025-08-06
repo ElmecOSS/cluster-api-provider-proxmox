@@ -147,7 +147,7 @@ func TestProxmoxAPIClient_GetReservableMemoryBytes(t *testing.T) {
 			httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/lxc`,
 				newJSONResponder(200, proxmox.Containers{}))
 
-			reservable, err := client.GetReservableMemoryBytes(context.Background(), "test", test.nodeMemoryAdjustment)
+			reservable, err := client.GetReservableMemoryBytes(context.Background(), "test", test.nodeMemoryAdjustment, "")
 			require.NoError(t, err)
 			require.Equal(t, test.expect, reservable)
 		})
@@ -157,7 +157,7 @@ func TestProxmoxAPIClient_GetReservableMemoryBytes(t *testing.T) {
 		client := newTestClient(t)
 		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/status`,
 			newJSONResponder(401, "Forbidden"))
-		reservable, err := client.GetReservableMemoryBytes(context.Background(), "test", 0)
+		reservable, err := client.GetReservableMemoryBytes(context.Background(), "test", 0, "")
 		require.Error(t, err)
 		require.Equal(t, uint64(0), reservable)
 		require.Equal(t,
@@ -171,7 +171,7 @@ func TestProxmoxAPIClient_GetReservableMemoryBytes(t *testing.T) {
 			newJSONResponder(200, proxmox.Node{Memory: proxmox.Memory{Total: 30}}))
 		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/qemu`,
 			newJSONResponder(401, nil))
-		reservable, err := client.GetReservableMemoryBytes(context.Background(), "test", 1)
+		reservable, err := client.GetReservableMemoryBytes(context.Background(), "test", 1, "")
 		require.Error(t, err)
 		require.Equal(t, uint64(0), reservable)
 		require.Equal(t,
@@ -215,7 +215,7 @@ func TestProxmoxAPIClient_CloneVM(t *testing.T) {
 				newJSONResponder(test.http[5], "101"))
 
 			clone := capmox.VMCloneRequest{Node: "test"}
-			cloneresponse, err := client.CloneVM(context.Background(), 100, clone)
+			cloneresponse, err := client.CloneVM(context.Background(), 100, clone, "")
 
 			if test.fails {
 				require.Error(t, err)
@@ -259,7 +259,7 @@ func TestProxmoxAPIClient_ConfigureVM(t *testing.T) {
 				newJSONResponder(200,
 					proxmox.NodeStatuses{{Name: "test"}, {Name: "test2"}}))
 
-			node, err := client.Client.Node(context.Background(), "test")
+			node, err := client.getClient("").Node(context.Background(), "test")
 			require.NoError(t, err)
 			vm, err := node.VirtualMachine(context.Background(), 101)
 			require.NoError(t, err)
@@ -318,7 +318,7 @@ func TestProxmoxAPIClient_GetVM(t *testing.T) {
 				newJSONResponder(200,
 					proxmox.NodeStatuses{{Name: "test"}, {Name: "test2"}}))
 
-			vm, err := client.GetVM(context.Background(), test.node, test.vmID)
+			vm, err := client.GetVM(context.Background(), test.node, test.vmID, "")
 
 			if test.fails {
 				require.Error(t, err)
@@ -358,7 +358,7 @@ func TestProxmoxAPIClient_FindVMResource(t *testing.T) {
 					&proxmox.ClusterResource{VMID: 101},
 				}))
 
-			clusterResource, err := client.FindVMResource(context.Background(), test.vmID)
+			clusterResource, err := client.FindVMResource(context.Background(), test.vmID, "")
 
 			if test.fails {
 				require.Error(t, err)
@@ -477,7 +477,7 @@ func TestProxmoxAPIClient_FindVMTemplateByTags(t *testing.T) {
 			httpmock.RegisterResponder(http.MethodGet, `=~/cluster/resources`,
 				newJSONResponder(test.http[1], proxmoxClusterResources))
 
-			vmTemplateNode, vmTemplateID, err := client.FindVMTemplateByTags(context.Background(), test.vmTags)
+			vmTemplateNode, vmTemplateID, err := client.FindVMTemplateByTags(context.Background(), test.vmTags, "")
 
 			if test.fails {
 				require.Error(t, err)
@@ -534,7 +534,7 @@ func TestProxmoxAPIClient_DeleteVM(t *testing.T) {
 				newJSONResponder(200,
 					proxmox.NodeStatuses{{Name: "test"}, {Name: "test2"}}))
 
-			task, err := client.DeleteVM(context.Background(), test.node, test.vmID)
+			task, err := client.DeleteVM(context.Background(), test.node, test.vmID, "")
 
 			if test.fails {
 				require.Error(t, err)
@@ -571,11 +571,11 @@ func TestProxmoxAPIClient_GetTask(t *testing.T) {
 				newJSONResponder(501, nil))
 
 			if test.fails {
-				_, err := client.GetTask(context.Background(), upid2)
+				_, err := client.GetTask(context.Background(), upid2, "")
 				require.Error(t, err)
 				require.Equal(t, test.err, err.Error())
 			} else {
-				task, err := client.GetTask(context.Background(), upid)
+				task, err := client.GetTask(context.Background(), upid, "")
 				require.NoError(t, err)
 				require.Equal(t, upid, string(task.UPID))
 				require.Equal(t, "101", task.ID)
@@ -650,7 +650,7 @@ func TestProxmoxAPIClient_CloudInitStatus(t *testing.T) {
 					Name: "legit-worker",
 				}))
 
-			vm, err := client.GetVM(context.Background(), test.node, test.vmid)
+			vm, err := client.GetVM(context.Background(), test.node, test.vmid, "")
 			require.NoError(t, err)
 			require.NotNil(t, vm)
 

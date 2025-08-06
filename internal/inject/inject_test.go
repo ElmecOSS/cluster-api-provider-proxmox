@@ -86,7 +86,7 @@ func TestISOInjectorInjectCloudInit(t *testing.T) {
 	httpmock.RegisterResponder(http.MethodGet, fmt.Sprintf(`=~/nodes/%s/qemu/%d/config`, "pve", 100),
 		newJSONResponder(200, vm.VirtualMachineConfig, 1))
 
-	vm, err := client.GetVM(context.Background(), "pve", 100)
+	vm, err := client.GetVM(context.Background(), "pve", 100, "")
 	require.NoError(t, err)
 
 	injector := &ISOInjector{
@@ -180,7 +180,7 @@ func TestISOInjectorInjectIgnition(t *testing.T) {
 	httpmock.RegisterResponder(http.MethodGet, fmt.Sprintf(`=~/nodes/%s/qemu/%d/config`, "pve", 100),
 		newJSONResponder(200, vm.VirtualMachineConfig, 1))
 
-	vm, err := client.GetVM(context.Background(), "pve", 100)
+	vm, err := client.GetVM(context.Background(), "pve", 100, "")
 	require.NoError(t, err)
 
 	enricher := &ignition.Enricher{

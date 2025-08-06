@@ -982,6 +982,12 @@ spec:
                   This is always done when you clone a normal VM.
                   Create a Full clone by default.
                 type: boolean
+              instance:
+                description: |-
+                  Instance specifies which Proxmox cluster instance this machine should be deployed to.
+                  This field is used when the ProxmoxCluster is configured in MultiInstance mode.
+                  If not specified, the machine will be deployed to a suitable instance based on cluster settings.
+                type: string
               memoryMiB:
                 description: |-
                   MemoryMiB is the size of a virtual machine's memory, in MiB.

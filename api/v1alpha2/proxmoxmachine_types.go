@@ -131,6 +131,12 @@ type ProxmoxMachineSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:items:Pattern=`^(?i)[a-z0-9_][a-z0-9_\-\+\.]*$`
 	Tags []string `json:"tags,omitempty"`
+
+	// Instance specifies which Proxmox cluster instance this machine should be deployed to.
+	// This field is used when the ProxmoxCluster is configured in MultiInstance mode.
+	// If not specified, the machine will be deployed to a suitable instance based on cluster settings.
+	// +optional
+	Instance string `json:"instance,omitempty"`
 }
 
 // Storage is the physical storage on the node.
@@ -629,6 +635,14 @@ func (r *ProxmoxMachine) GetTemplateSelectorTags() []string {
 // GetNode get the Proxmox node used to provision this machine.
 func (r *ProxmoxMachine) GetNode() string {
 	return r.Spec.SourceNode
+}
+
+// GetInstance returns the Proxmox cluster instance this machine should be deployed to.
+func (r *ProxmoxMachine) GetInstance() string {
+	if r.Spec.Instance != "" {
+		return r.Spec.Instance
+	}
+	return ""
 }
 
 // FormatSize returns the format required for the Proxmox API.

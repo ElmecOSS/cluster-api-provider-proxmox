@@ -17,7 +17,7 @@ limitations under the License.
 package vmservice
 
 import (
-	infrav2alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
+	infrav1alpha2 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -162,8 +162,8 @@ func TestShouldUpdateNetworkDevices_NoNetworkConfig(t *testing.T) {
 
 func TestShouldUpdateNetworkDevices_MissingDefaultDeviceOnVM(t *testing.T) {
 	machineScope, _, _ := setupReconcilerTest(t)
-	machineScope.ProxmoxMachine.Spec.Network = &infrav2alpha2.NetworkSpec{
-		Default: &infrav2alpha2.NetworkDevice{Bridge: "vmbr1", Model: ptr.To("virtio")},
+	machineScope.ProxmoxMachine.Spec.Network = &infrav1alpha2.NetworkSpec{
+		Default: &infrav1alpha2.NetworkDevice{Bridge: "vmbr1", Model: ptr.To("virtio")},
 	}
 	machineScope.SetVirtualMachine(newStoppedVM())
 
@@ -172,8 +172,8 @@ func TestShouldUpdateNetworkDevices_MissingDefaultDeviceOnVM(t *testing.T) {
 
 func TestShouldUpdateNetworkDevices_DefaultDeviceNeedsUpdate(t *testing.T) {
 	machineScope, _, _ := setupReconcilerTest(t)
-	machineScope.ProxmoxMachine.Spec.Network = &infrav2alpha2.NetworkSpec{
-		Default: &infrav2alpha2.NetworkDevice{Bridge: "vmbr1", Model: ptr.To("virtio")},
+	machineScope.ProxmoxMachine.Spec.Network = &infrav1alpha2.NetworkSpec{
+		Default: &infrav1alpha2.NetworkDevice{Bridge: "vmbr1", Model: ptr.To("virtio")},
 	}
 	machineScope.SetVirtualMachine(newVMWithNets("virtio=A6:23:64:4D:84:CB,bridge=vmbr0"))
 
@@ -182,9 +182,9 @@ func TestShouldUpdateNetworkDevices_DefaultDeviceNeedsUpdate(t *testing.T) {
 
 func TestShouldUpdateNetworkDevices_MissingAdditionalDeviceOnVM(t *testing.T) {
 	machineScope, _, _ := setupReconcilerTest(t)
-	machineScope.ProxmoxMachine.Spec.Network = &infrav2alpha2.NetworkSpec{
-		AdditionalDevices: []infrav2alpha2.AdditionalNetworkDevice{
-			{Name: "net1", NetworkDevice: infrav2alpha2.NetworkDevice{Bridge: "vmbr1", Model: ptr.To("virtio")}},
+	machineScope.ProxmoxMachine.Spec.Network = &infrav1alpha2.NetworkSpec{
+		AdditionalDevices: []infrav1alpha2.AdditionalNetworkDevice{
+			{Name: "net1", NetworkDevice: infrav1alpha2.NetworkDevice{Bridge: "vmbr1", Model: ptr.To("virtio")}},
 		},
 	}
 	machineScope.SetVirtualMachine(newVMWithNets("virtio=A6:23:64:4D:84:CB,bridge=vmbr0"))
@@ -194,9 +194,9 @@ func TestShouldUpdateNetworkDevices_MissingAdditionalDeviceOnVM(t *testing.T) {
 
 func TestShouldUpdateNetworkDevices_AdditionalDeviceNeedsUpdate(t *testing.T) {
 	machineScope, _, _ := setupReconcilerTest(t)
-	machineScope.ProxmoxMachine.Spec.Network = &infrav2alpha2.NetworkSpec{
-		AdditionalDevices: []infrav2alpha2.AdditionalNetworkDevice{
-			{Name: "net1", NetworkDevice: infrav2alpha2.NetworkDevice{Bridge: "vmbr1", Model: ptr.To("virtio")}},
+	machineScope.ProxmoxMachine.Spec.Network = &infrav1alpha2.NetworkSpec{
+		AdditionalDevices: []infrav1alpha2.AdditionalNetworkDevice{
+			{Name: "net1", NetworkDevice: infrav1alpha2.NetworkDevice{Bridge: "vmbr1", Model: ptr.To("virtio")}},
 		},
 	}
 	machineScope.SetVirtualMachine(newVMWithNets("", "virtio=A6:23:64:4D:84:CB,bridge=vmbr0"))
@@ -206,10 +206,10 @@ func TestShouldUpdateNetworkDevices_AdditionalDeviceNeedsUpdate(t *testing.T) {
 
 func TestShouldUpdateNetworkDevices_NoUpdate(t *testing.T) {
 	machineScope, _, _ := setupReconcilerTest(t)
-	machineScope.ProxmoxMachine.Spec.Network = &infrav2alpha2.NetworkSpec{
-		Default: &infrav2alpha2.NetworkDevice{Bridge: "vmbr0", Model: ptr.To("virtio"), MTU: ptr.To(uint16(1500))},
-		AdditionalDevices: []infrav2alpha2.AdditionalNetworkDevice{
-			{Name: "net1", NetworkDevice: infrav2alpha2.NetworkDevice{Bridge: "vmbr1", Model: ptr.To("virtio"), MTU: ptr.To(uint16(1500))}},
+	machineScope.ProxmoxMachine.Spec.Network = &infrav1alpha2.NetworkSpec{
+		Default: &infrav1alpha2.NetworkDevice{Bridge: "vmbr0", Model: ptr.To("virtio"), MTU: ptr.To(uint16(1500))},
+		AdditionalDevices: []infrav1alpha2.AdditionalNetworkDevice{
+			{Name: "net1", NetworkDevice: infrav1alpha2.NetworkDevice{Bridge: "vmbr1", Model: ptr.To("virtio"), MTU: ptr.To(uint16(1500))}},
 		},
 	}
 	machineScope.SetVirtualMachine(newVMWithNets("virtio=A6:23:64:4D:84:CD,bridge=vmbr0,mtu=1500", "virtio=A6:23:64:4D:84:CD,bridge=vmbr1,mtu=1500"))
@@ -251,8 +251,8 @@ func TestExtractNetworkVLAN(t *testing.T) {
 
 func TestShouldUpdateNetworkDevices_VLANChanged(t *testing.T) {
 	machineScope, _, _ := setupReconcilerTest(t)
-	machineScope.ProxmoxMachine.Spec.Network = &infrav2alpha2.NetworkSpec{
-		Default: &infrav2alpha2.NetworkDevice{Bridge: "vmbr0", Model: ptr.To("virtio"), VLAN: ptr.To(uint16(100))},
+	machineScope.ProxmoxMachine.Spec.Network = &infrav1alpha2.NetworkSpec{
+		Default: &infrav1alpha2.NetworkDevice{Bridge: "vmbr0", Model: ptr.To("virtio"), VLAN: ptr.To(uint16(100))},
 	}
 	machineScope.SetVirtualMachine(newVMWithNets("virtio=A6:23:64:4D:84:CB,bridge=vmbr0,tag=101"))
 
