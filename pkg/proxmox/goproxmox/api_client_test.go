@@ -39,7 +39,7 @@ func newTestClient(t *testing.T) *APIClient {
 	httpmock.RegisterResponder(http.MethodGet, testBaseURL+"api2/json/version",
 		newJSONResponder(200, proxmox.Version{Release: "test"}))
 
-	client, err := NewAPIClient(context.Background(), logr.Discard(), testBaseURL)
+	client, err := NewAPIClient(context.Background(), logr.Discard(), testBaseURL, DefaultInstanceName)
 	require.NoError(t, err)
 
 	return client

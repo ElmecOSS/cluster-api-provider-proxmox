@@ -43,7 +43,7 @@ func TestReconcileVM_EverythingReady(t *testing.T) {
 	machineScope.ProxmoxMachine.Status.BootstrapDataProvided = ptr.To(true)
 	machineScope.ProxmoxMachine.Status.Ready = true
 
-	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123), "").Return(vm, nil).Once()
 	proxmoxClient.EXPECT().CloudInitStatus(context.Background(), vm).Return(false, nil).Once()
 	proxmoxClient.EXPECT().QemuAgentStatus(context.Background(), vm).Return(nil).Once()
 
@@ -64,7 +64,7 @@ func TestReconcileVM_QemuAgentCheckDisabled(t *testing.T) {
 		SkipQemuGuestAgent: ptr.To(true),
 	}
 
-	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123), "").Return(vm, nil).Once()
 	// proxmoxClient.EXPECT().CloudInitStatus(context.Background(), vm).Return(false, nil).Once()
 
 	result, err := ReconcileVM(context.Background(), machineScope)
@@ -84,7 +84,7 @@ func TestReconcileVM_CloudInitCheckDisabled(t *testing.T) {
 		SkipCloudInitStatus: ptr.To(true),
 	}
 
-	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123), "").Return(vm, nil).Once()
 	proxmoxClient.EXPECT().QemuAgentStatus(context.Background(), vm).Return(nil)
 
 	result, err := ReconcileVM(context.Background(), machineScope)
@@ -105,7 +105,7 @@ func TestReconcileVM_InitCheckDisabled(t *testing.T) {
 		SkipQemuGuestAgent:  ptr.To(true),
 	}
 
-	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123), "").Return(vm, nil).Once()
 
 	result, err := ReconcileVM(context.Background(), machineScope)
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestEnsureVirtualMachine_CreateVM_FullOptions(t *testing.T) {
 		Target:      "node2",
 	}
 	response := proxmox.VMCloneResponse{NewID: 123, Task: newTask()}
-	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions).Return(response, nil).Once()
+	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions, "").Return(response, nil).Once()
 
 	requeue, err := ensureVirtualMachine(context.Background(), machineScope)
 	require.NoError(t, err)
@@ -175,10 +175,10 @@ func TestEnsureVirtualMachine_CreateVM_FullOptions_TemplateSelector(t *testing.T
 		Target:      "node2",
 	}
 
-	proxmoxClient.EXPECT().FindVMTemplateByTags(context.Background(), vmTemplateTags).Return("node1", 123, nil).Once()
+	proxmoxClient.EXPECT().FindVMTemplateByTags(context.Background(), vmTemplateTags, "").Return("node1", 123, nil).Once()
 
 	response := proxmox.VMCloneResponse{NewID: 123, Task: newTask()}
-	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions).Return(response, nil).Once()
+	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions, "").Return(response, nil).Once()
 
 	requeue, err := ensureVirtualMachine(context.Background(), machineScope)
 	require.NoError(t, err)
@@ -209,7 +209,7 @@ func TestEnsureVirtualMachine_CreateVM_FullOptions_TemplateSelector_VMTemplateNo
 	machineScope.ProxmoxMachine.Spec.Storage = ptr.To("storage")
 	machineScope.ProxmoxMachine.Spec.Target = ptr.To("node2")
 
-	proxmoxClient.EXPECT().FindVMTemplateByTags(context.Background(), vmTemplateTags).Return("", -1, goproxmox.ErrTemplateNotFound).Once()
+	proxmoxClient.EXPECT().FindVMTemplateByTags(context.Background(), vmTemplateTags, "").Return("", -1, goproxmox.ErrTemplateNotFound).Once()
 
 	_, err := createVM(ctx, machineScope)
 
@@ -230,7 +230,7 @@ func TestEnsureVirtualMachine_CreateVM_SelectNode(t *testing.T) {
 
 	expectedOptions := proxmox.VMCloneRequest{Node: "node1", Name: "test", Target: "node3"}
 	response := proxmox.VMCloneResponse{NewID: 123, Task: newTask()}
-	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions).Return(response, nil).Once()
+	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions, "").Return(response, nil).Once()
 
 	requeue, err := ensureVirtualMachine(context.Background(), machineScope)
 	require.NoError(t, err)
@@ -253,7 +253,7 @@ func TestEnsureVirtualMachine_CreateVM_SelectNode_MachineAllowedNodes(t *testing
 
 	expectedOptions := proxmox.VMCloneRequest{Node: "node1", Name: "test", Target: "node2"}
 	response := proxmox.VMCloneResponse{NewID: 123, Task: newTask()}
-	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions).Return(response, nil).Once()
+	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions, "").Return(response, nil).Once()
 
 	requeue, err := ensureVirtualMachine(context.Background(), machineScope)
 	require.NoError(t, err)
@@ -292,7 +292,7 @@ func TestEnsureVirtualMachine_CreateVM_VMIDRange(t *testing.T) {
 	response := proxmox.VMCloneResponse{Task: newTask(), NewID: int64(1001)}
 	proxmoxClient.Mock.On("CheckID", context.Background(), int64(1000)).Return(false, nil)
 	proxmoxClient.Mock.On("CheckID", context.Background(), int64(1001)).Return(true, nil)
-	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions).Return(response, nil).Once()
+	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions, "").Return(response, nil).Once()
 
 	requeue, err := ensureVirtualMachine(context.Background(), machineScope)
 	require.NoError(t, err)
@@ -332,7 +332,7 @@ func TestEnsureVirtualMachine_CreateVM_VMIDRangeCheckExisting(t *testing.T) {
 	// It is called once when reconciling this test vm.
 	vm := newRunningVM()
 	vm.Name = "vm1000"
-	proxmoxClient.EXPECT().GetVM(context.Background(), "", int64(1000)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().GetVM(context.Background(), "", int64(1000), "").Return(vm, nil).Once()
 	proxmoxClient.Mock.On("CheckID", context.Background(), int64(1000)).Return(false, nil).Once()
 	infraMachine := infrav1alpha2.ProxmoxMachine{
 		ObjectMeta: metav1.ObjectMeta{
@@ -369,7 +369,7 @@ func TestEnsureVirtualMachine_CreateVM_VMIDRangeCheckExisting(t *testing.T) {
 
 	expectedOptions := proxmox.VMCloneRequest{Node: "node1", NewID: 1002, Name: "test"}
 	response := proxmox.VMCloneResponse{Task: newTask(), NewID: int64(1002)}
-	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions).Return(response, nil).Once()
+	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions, "").Return(response, nil).Once()
 	proxmoxClient.Mock.On("CheckID", context.Background(), int64(1001)).Return(false, nil).Once()
 	proxmoxClient.Mock.On("CheckID", context.Background(), int64(1002)).Return(true, nil).Once()
 
@@ -385,7 +385,7 @@ func TestEnsureVirtualMachine_FindVM(t *testing.T) {
 	vm := newStoppedVM()
 	vm.VirtualMachineConfig.SMBios1 = "uuid=56603c36-46b9-4608-90ae-c731c15eae64"
 
-	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123), "").Return(vm, nil).Once()
 
 	requeue, err := ensureVirtualMachine(context.Background(), machineScope)
 	require.NoError(t, err)
@@ -399,8 +399,8 @@ func TestEnsureVirtualMachine_UpdateVMLocation_Error(t *testing.T) {
 	machineScope, proxmoxClient, _ := setupReconcilerTest(t)
 	machineScope.SetVirtualMachineID(123)
 
-	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(nil, fmt.Errorf("not found")).Once()
-	proxmoxClient.EXPECT().FindVMResource(context.Background(), uint64(123)).Return(nil, fmt.Errorf("unavailalbe")).Once()
+	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123), "").Return(nil, fmt.Errorf("not found")).Once()
+	proxmoxClient.EXPECT().FindVMResource(context.Background(), uint64(123), "").Return(nil, fmt.Errorf("unavailalbe")).Once()
 
 	_, err := ensureVirtualMachine(context.Background(), machineScope)
 	require.Error(t, err)
@@ -624,7 +624,7 @@ func TestReconcileVM_CloudInitFailed(t *testing.T) {
 	machineScope.ProxmoxMachine.Status.BootstrapDataProvided = ptr.To(true)
 	machineScope.ProxmoxMachine.Status.Ready = true
 
-	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123), "").Return(vm, nil).Once()
 	proxmoxClient.EXPECT().CloudInitStatus(context.Background(), vm).Return(false, goproxmox.ErrCloudInitFailed).Once()
 	proxmoxClient.EXPECT().QemuAgentStatus(context.Background(), vm).Return(nil).Once()
 
@@ -642,7 +642,7 @@ func TestReconcileVM_CloudInitRunning(t *testing.T) {
 	machineScope.ProxmoxMachine.Status.BootstrapDataProvided = ptr.To(true)
 	machineScope.ProxmoxMachine.Status.Ready = true
 
-	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123), "").Return(vm, nil).Once()
 	proxmoxClient.EXPECT().CloudInitStatus(context.Background(), vm).Return(true, nil).Once()
 	proxmoxClient.EXPECT().QemuAgentStatus(context.Background(), vm).Return(nil).Once()
 

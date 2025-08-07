@@ -24,9 +24,9 @@ func (_m *MockClient) EXPECT() *MockClient_Expecter {
 	return &MockClient_Expecter{mock: &_m.Mock}
 }
 
-// CheckID provides a mock function with given fields: ctx, vmID
-func (_m *MockClient) CheckID(ctx context.Context, vmID int64, _ string) (bool, error) {
-	ret := _m.Called(ctx, vmID)
+// CheckID provides a mock function with given fields: ctx, vmID, instanceName
+func (_m *MockClient) CheckID(ctx context.Context, vmID int64, instanceName string) (bool, error) {
+	ret := _m.Called(ctx, vmID, instanceName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CheckID")
@@ -34,17 +34,17 @@ func (_m *MockClient) CheckID(ctx context.Context, vmID int64, _ string) (bool, 
 
 	var r0 bool
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64) (bool, error)); ok {
-		return rf(ctx, vmID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string) (bool, error)); ok {
+		return rf(ctx, vmID, instanceName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64) bool); ok {
-		r0 = rf(ctx, vmID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string) bool); ok {
+		r0 = rf(ctx, vmID, instanceName)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
-		r1 = rf(ctx, vmID)
+	if rf, ok := ret.Get(1).(func(context.Context, int64, string) error); ok {
+		r1 = rf(ctx, vmID, instanceName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -60,13 +60,14 @@ type MockClient_CheckID_Call struct {
 // CheckID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - vmID int64
-func (_e *MockClient_Expecter) CheckID(ctx interface{}, vmID interface{}) *MockClient_CheckID_Call {
-	return &MockClient_CheckID_Call{Call: _e.mock.On("CheckID", ctx, vmID)}
+//   - instanceName string
+func (_e *MockClient_Expecter) CheckID(ctx interface{}, vmID interface{}, instanceName interface{}) *MockClient_CheckID_Call {
+	return &MockClient_CheckID_Call{Call: _e.mock.On("CheckID", ctx, vmID, instanceName)}
 }
 
-func (_c *MockClient_CheckID_Call) Run(run func(ctx context.Context, vmID int64)) *MockClient_CheckID_Call {
+func (_c *MockClient_CheckID_Call) Run(run func(ctx context.Context, vmID int64, instanceName string)) *MockClient_CheckID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64))
+		run(args[0].(context.Context), args[1].(int64), args[2].(string))
 	})
 	return _c
 }
@@ -76,14 +77,14 @@ func (_c *MockClient_CheckID_Call) Return(_a0 bool, _a1 error) *MockClient_Check
 	return _c
 }
 
-func (_c *MockClient_CheckID_Call) RunAndReturn(run func(context.Context, int64) (bool, error)) *MockClient_CheckID_Call {
+func (_c *MockClient_CheckID_Call) RunAndReturn(run func(context.Context, int64, string) (bool, error)) *MockClient_CheckID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CloneVM provides a mock function with given fields: ctx, templateID, clone
-func (_m *MockClient) CloneVM(ctx context.Context, templateID int, clone proxmox.VMCloneRequest, _ string) (proxmox.VMCloneResponse, error) {
-	ret := _m.Called(ctx, templateID, clone)
+// CloneVM provides a mock function with given fields: ctx, templateID, clone, instanceName
+func (_m *MockClient) CloneVM(ctx context.Context, templateID int, clone proxmox.VMCloneRequest, instanceName string) (proxmox.VMCloneResponse, error) {
+	ret := _m.Called(ctx, templateID, clone, instanceName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CloneVM")
@@ -91,17 +92,17 @@ func (_m *MockClient) CloneVM(ctx context.Context, templateID int, clone proxmox
 
 	var r0 proxmox.VMCloneResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int, proxmox.VMCloneRequest) (proxmox.VMCloneResponse, error)); ok {
-		return rf(ctx, templateID, clone)
+	if rf, ok := ret.Get(0).(func(context.Context, int, proxmox.VMCloneRequest, string) (proxmox.VMCloneResponse, error)); ok {
+		return rf(ctx, templateID, clone, instanceName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int, proxmox.VMCloneRequest) proxmox.VMCloneResponse); ok {
-		r0 = rf(ctx, templateID, clone)
+	if rf, ok := ret.Get(0).(func(context.Context, int, proxmox.VMCloneRequest, string) proxmox.VMCloneResponse); ok {
+		r0 = rf(ctx, templateID, clone, instanceName)
 	} else {
 		r0 = ret.Get(0).(proxmox.VMCloneResponse)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int, proxmox.VMCloneRequest) error); ok {
-		r1 = rf(ctx, templateID, clone)
+	if rf, ok := ret.Get(1).(func(context.Context, int, proxmox.VMCloneRequest, string) error); ok {
+		r1 = rf(ctx, templateID, clone, instanceName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -118,13 +119,14 @@ type MockClient_CloneVM_Call struct {
 //   - ctx context.Context
 //   - templateID int
 //   - clone proxmox.VMCloneRequest
-func (_e *MockClient_Expecter) CloneVM(ctx interface{}, templateID interface{}, clone interface{}) *MockClient_CloneVM_Call {
-	return &MockClient_CloneVM_Call{Call: _e.mock.On("CloneVM", ctx, templateID, clone)}
+//   - instanceName string
+func (_e *MockClient_Expecter) CloneVM(ctx interface{}, templateID interface{}, clone interface{}, instanceName interface{}) *MockClient_CloneVM_Call {
+	return &MockClient_CloneVM_Call{Call: _e.mock.On("CloneVM", ctx, templateID, clone, instanceName)}
 }
 
-func (_c *MockClient_CloneVM_Call) Run(run func(ctx context.Context, templateID int, clone proxmox.VMCloneRequest)) *MockClient_CloneVM_Call {
+func (_c *MockClient_CloneVM_Call) Run(run func(ctx context.Context, templateID int, clone proxmox.VMCloneRequest, instanceName string)) *MockClient_CloneVM_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int), args[2].(proxmox.VMCloneRequest))
+		run(args[0].(context.Context), args[1].(int), args[2].(proxmox.VMCloneRequest), args[3].(string))
 	})
 	return _c
 }
@@ -134,7 +136,7 @@ func (_c *MockClient_CloneVM_Call) Return(_a0 proxmox.VMCloneResponse, _a1 error
 	return _c
 }
 
-func (_c *MockClient_CloneVM_Call) RunAndReturn(run func(context.Context, int, proxmox.VMCloneRequest) (proxmox.VMCloneResponse, error)) *MockClient_CloneVM_Call {
+func (_c *MockClient_CloneVM_Call) RunAndReturn(run func(context.Context, int, proxmox.VMCloneRequest, string) (proxmox.VMCloneResponse, error)) *MockClient_CloneVM_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -270,9 +272,9 @@ func (_c *MockClient_ConfigureVM_Call) RunAndReturn(run func(context.Context, *g
 	return _c
 }
 
-// DeleteVM provides a mock function with given fields: ctx, nodeName, vmID
-func (_m *MockClient) DeleteVM(ctx context.Context, nodeName string, vmID int64, _ string) (*go_proxmox.Task, error) {
-	ret := _m.Called(ctx, nodeName, vmID)
+// DeleteVM provides a mock function with given fields: ctx, nodeName, vmID, instanceName
+func (_m *MockClient) DeleteVM(ctx context.Context, nodeName string, vmID int64, instanceName string) (*go_proxmox.Task, error) {
+	ret := _m.Called(ctx, nodeName, vmID, instanceName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DeleteVM")
@@ -280,19 +282,19 @@ func (_m *MockClient) DeleteVM(ctx context.Context, nodeName string, vmID int64,
 
 	var r0 *go_proxmox.Task
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, int64) (*go_proxmox.Task, error)); ok {
-		return rf(ctx, nodeName, vmID)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64, string) (*go_proxmox.Task, error)); ok {
+		return rf(ctx, nodeName, vmID, instanceName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, int64) *go_proxmox.Task); ok {
-		r0 = rf(ctx, nodeName, vmID)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64, string) *go_proxmox.Task); ok {
+		r0 = rf(ctx, nodeName, vmID, instanceName)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*go_proxmox.Task)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, int64) error); ok {
-		r1 = rf(ctx, nodeName, vmID)
+	if rf, ok := ret.Get(1).(func(context.Context, string, int64, string) error); ok {
+		r1 = rf(ctx, nodeName, vmID, instanceName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -309,13 +311,14 @@ type MockClient_DeleteVM_Call struct {
 //   - ctx context.Context
 //   - nodeName string
 //   - vmID int64
-func (_e *MockClient_Expecter) DeleteVM(ctx interface{}, nodeName interface{}, vmID interface{}) *MockClient_DeleteVM_Call {
-	return &MockClient_DeleteVM_Call{Call: _e.mock.On("DeleteVM", ctx, nodeName, vmID)}
+//   - instanceName string
+func (_e *MockClient_Expecter) DeleteVM(ctx interface{}, nodeName interface{}, vmID interface{}, instanceName interface{}) *MockClient_DeleteVM_Call {
+	return &MockClient_DeleteVM_Call{Call: _e.mock.On("DeleteVM", ctx, nodeName, vmID, instanceName)}
 }
 
-func (_c *MockClient_DeleteVM_Call) Run(run func(ctx context.Context, nodeName string, vmID int64)) *MockClient_DeleteVM_Call {
+func (_c *MockClient_DeleteVM_Call) Run(run func(ctx context.Context, nodeName string, vmID int64, instanceName string)) *MockClient_DeleteVM_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(int64))
+		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].(string))
 	})
 	return _c
 }
@@ -325,14 +328,14 @@ func (_c *MockClient_DeleteVM_Call) Return(_a0 *go_proxmox.Task, _a1 error) *Moc
 	return _c
 }
 
-func (_c *MockClient_DeleteVM_Call) RunAndReturn(run func(context.Context, string, int64) (*go_proxmox.Task, error)) *MockClient_DeleteVM_Call {
+func (_c *MockClient_DeleteVM_Call) RunAndReturn(run func(context.Context, string, int64, string) (*go_proxmox.Task, error)) *MockClient_DeleteVM_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// FindVMResource provides a mock function with given fields: ctx, vmID
-func (_m *MockClient) FindVMResource(ctx context.Context, vmID uint64, _ string) (*go_proxmox.ClusterResource, error) {
-	ret := _m.Called(ctx, vmID)
+// FindVMResource provides a mock function with given fields: ctx, vmID, instanceName
+func (_m *MockClient) FindVMResource(ctx context.Context, vmID uint64, instanceName string) (*go_proxmox.ClusterResource, error) {
+	ret := _m.Called(ctx, vmID, instanceName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindVMResource")
@@ -340,19 +343,19 @@ func (_m *MockClient) FindVMResource(ctx context.Context, vmID uint64, _ string)
 
 	var r0 *go_proxmox.ClusterResource
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, uint64) (*go_proxmox.ClusterResource, error)); ok {
-		return rf(ctx, vmID)
+	if rf, ok := ret.Get(0).(func(context.Context, uint64, string) (*go_proxmox.ClusterResource, error)); ok {
+		return rf(ctx, vmID, instanceName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, uint64) *go_proxmox.ClusterResource); ok {
-		r0 = rf(ctx, vmID)
+	if rf, ok := ret.Get(0).(func(context.Context, uint64, string) *go_proxmox.ClusterResource); ok {
+		r0 = rf(ctx, vmID, instanceName)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*go_proxmox.ClusterResource)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, uint64) error); ok {
-		r1 = rf(ctx, vmID)
+	if rf, ok := ret.Get(1).(func(context.Context, uint64, string) error); ok {
+		r1 = rf(ctx, vmID, instanceName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -368,13 +371,14 @@ type MockClient_FindVMResource_Call struct {
 // FindVMResource is a helper method to define mock.On call
 //   - ctx context.Context
 //   - vmID uint64
-func (_e *MockClient_Expecter) FindVMResource(ctx interface{}, vmID interface{}) *MockClient_FindVMResource_Call {
-	return &MockClient_FindVMResource_Call{Call: _e.mock.On("FindVMResource", ctx, vmID)}
+//   - instanceName string
+func (_e *MockClient_Expecter) FindVMResource(ctx interface{}, vmID interface{}, instanceName interface{}) *MockClient_FindVMResource_Call {
+	return &MockClient_FindVMResource_Call{Call: _e.mock.On("FindVMResource", ctx, vmID, instanceName)}
 }
 
-func (_c *MockClient_FindVMResource_Call) Run(run func(ctx context.Context, vmID uint64)) *MockClient_FindVMResource_Call {
+func (_c *MockClient_FindVMResource_Call) Run(run func(ctx context.Context, vmID uint64, instanceName string)) *MockClient_FindVMResource_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(uint64))
+		run(args[0].(context.Context), args[1].(uint64), args[2].(string))
 	})
 	return _c
 }
@@ -384,14 +388,14 @@ func (_c *MockClient_FindVMResource_Call) Return(_a0 *go_proxmox.ClusterResource
 	return _c
 }
 
-func (_c *MockClient_FindVMResource_Call) RunAndReturn(run func(context.Context, uint64) (*go_proxmox.ClusterResource, error)) *MockClient_FindVMResource_Call {
+func (_c *MockClient_FindVMResource_Call) RunAndReturn(run func(context.Context, uint64, string) (*go_proxmox.ClusterResource, error)) *MockClient_FindVMResource_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// FindVMTemplateByTags provides a mock function with given fields: ctx, templateTags
-func (_m *MockClient) FindVMTemplateByTags(ctx context.Context, templateTags []string, _ string) (string, int32, error) {
-	ret := _m.Called(ctx, templateTags)
+// FindVMTemplateByTags provides a mock function with given fields: ctx, templateTags, instanceName
+func (_m *MockClient) FindVMTemplateByTags(ctx context.Context, templateTags []string, instanceName string) (string, int32, error) {
+	ret := _m.Called(ctx, templateTags, instanceName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindVMTemplateByTags")
@@ -400,23 +404,23 @@ func (_m *MockClient) FindVMTemplateByTags(ctx context.Context, templateTags []s
 	var r0 string
 	var r1 int32
 	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, []string) (string, int32, error)); ok {
-		return rf(ctx, templateTags)
+	if rf, ok := ret.Get(0).(func(context.Context, []string, string) (string, int32, error)); ok {
+		return rf(ctx, templateTags, instanceName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, []string) string); ok {
-		r0 = rf(ctx, templateTags)
+	if rf, ok := ret.Get(0).(func(context.Context, []string, string) string); ok {
+		r0 = rf(ctx, templateTags, instanceName)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, []string) int32); ok {
-		r1 = rf(ctx, templateTags)
+	if rf, ok := ret.Get(1).(func(context.Context, []string, string) int32); ok {
+		r1 = rf(ctx, templateTags, instanceName)
 	} else {
 		r1 = ret.Get(1).(int32)
 	}
 
-	if rf, ok := ret.Get(2).(func(context.Context, []string) error); ok {
-		r2 = rf(ctx, templateTags)
+	if rf, ok := ret.Get(2).(func(context.Context, []string, string) error); ok {
+		r2 = rf(ctx, templateTags, instanceName)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -432,13 +436,14 @@ type MockClient_FindVMTemplateByTags_Call struct {
 // FindVMTemplateByTags is a helper method to define mock.On call
 //   - ctx context.Context
 //   - templateTags []string
-func (_e *MockClient_Expecter) FindVMTemplateByTags(ctx interface{}, templateTags interface{}) *MockClient_FindVMTemplateByTags_Call {
-	return &MockClient_FindVMTemplateByTags_Call{Call: _e.mock.On("FindVMTemplateByTags", ctx, templateTags)}
+//   - instanceName string
+func (_e *MockClient_Expecter) FindVMTemplateByTags(ctx interface{}, templateTags interface{}, instanceName interface{}) *MockClient_FindVMTemplateByTags_Call {
+	return &MockClient_FindVMTemplateByTags_Call{Call: _e.mock.On("FindVMTemplateByTags", ctx, templateTags, instanceName)}
 }
 
-func (_c *MockClient_FindVMTemplateByTags_Call) Run(run func(ctx context.Context, templateTags []string)) *MockClient_FindVMTemplateByTags_Call {
+func (_c *MockClient_FindVMTemplateByTags_Call) Run(run func(ctx context.Context, templateTags []string, instanceName string)) *MockClient_FindVMTemplateByTags_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].([]string))
+		run(args[0].(context.Context), args[1].([]string), args[2].(string))
 	})
 	return _c
 }
@@ -448,14 +453,14 @@ func (_c *MockClient_FindVMTemplateByTags_Call) Return(_a0 string, _a1 int32, _a
 	return _c
 }
 
-func (_c *MockClient_FindVMTemplateByTags_Call) RunAndReturn(run func(context.Context, []string) (string, int32, error)) *MockClient_FindVMTemplateByTags_Call {
+func (_c *MockClient_FindVMTemplateByTags_Call) RunAndReturn(run func(context.Context, []string, string) (string, int32, error)) *MockClient_FindVMTemplateByTags_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetReservableMemoryBytes provides a mock function with given fields: ctx, nodeName, nodeMemoryAdjustment
-func (_m *MockClient) GetReservableMemoryBytes(ctx context.Context, nodeName string, nodeMemoryAdjustment uint64, _ string) (uint64, error) {
-	ret := _m.Called(ctx, nodeName, nodeMemoryAdjustment)
+// GetReservableMemoryBytes provides a mock function with given fields: ctx, nodeName, nodeMemoryAdjustment, instanceName
+func (_m *MockClient) GetReservableMemoryBytes(ctx context.Context, nodeName string, nodeMemoryAdjustment uint64, instanceName string) (uint64, error) {
+	ret := _m.Called(ctx, nodeName, nodeMemoryAdjustment, instanceName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetReservableMemoryBytes")
@@ -463,17 +468,17 @@ func (_m *MockClient) GetReservableMemoryBytes(ctx context.Context, nodeName str
 
 	var r0 uint64
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, uint64) (uint64, error)); ok {
-		return rf(ctx, nodeName, nodeMemoryAdjustment)
+	if rf, ok := ret.Get(0).(func(context.Context, string, uint64, string) (uint64, error)); ok {
+		return rf(ctx, nodeName, nodeMemoryAdjustment, instanceName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, uint64) uint64); ok {
-		r0 = rf(ctx, nodeName, nodeMemoryAdjustment)
+	if rf, ok := ret.Get(0).(func(context.Context, string, uint64, string) uint64); ok {
+		r0 = rf(ctx, nodeName, nodeMemoryAdjustment, instanceName)
 	} else {
 		r0 = ret.Get(0).(uint64)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, uint64) error); ok {
-		r1 = rf(ctx, nodeName, nodeMemoryAdjustment)
+	if rf, ok := ret.Get(1).(func(context.Context, string, uint64, string) error); ok {
+		r1 = rf(ctx, nodeName, nodeMemoryAdjustment, instanceName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -490,13 +495,14 @@ type MockClient_GetReservableMemoryBytes_Call struct {
 //   - ctx context.Context
 //   - nodeName string
 //   - nodeMemoryAdjustment uint64
-func (_e *MockClient_Expecter) GetReservableMemoryBytes(ctx interface{}, nodeName interface{}, nodeMemoryAdjustment interface{}) *MockClient_GetReservableMemoryBytes_Call {
-	return &MockClient_GetReservableMemoryBytes_Call{Call: _e.mock.On("GetReservableMemoryBytes", ctx, nodeName, nodeMemoryAdjustment)}
+//   - instanceName string
+func (_e *MockClient_Expecter) GetReservableMemoryBytes(ctx interface{}, nodeName interface{}, nodeMemoryAdjustment interface{}, instanceName interface{}) *MockClient_GetReservableMemoryBytes_Call {
+	return &MockClient_GetReservableMemoryBytes_Call{Call: _e.mock.On("GetReservableMemoryBytes", ctx, nodeName, nodeMemoryAdjustment, instanceName)}
 }
 
-func (_c *MockClient_GetReservableMemoryBytes_Call) Run(run func(ctx context.Context, nodeName string, nodeMemoryAdjustment uint64)) *MockClient_GetReservableMemoryBytes_Call {
+func (_c *MockClient_GetReservableMemoryBytes_Call) Run(run func(ctx context.Context, nodeName string, nodeMemoryAdjustment uint64, instanceName string)) *MockClient_GetReservableMemoryBytes_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(uint64))
+		run(args[0].(context.Context), args[1].(string), args[2].(uint64), args[3].(string))
 	})
 	return _c
 }
@@ -506,14 +512,14 @@ func (_c *MockClient_GetReservableMemoryBytes_Call) Return(_a0 uint64, _a1 error
 	return _c
 }
 
-func (_c *MockClient_GetReservableMemoryBytes_Call) RunAndReturn(run func(context.Context, string, uint64) (uint64, error)) *MockClient_GetReservableMemoryBytes_Call {
+func (_c *MockClient_GetReservableMemoryBytes_Call) RunAndReturn(run func(context.Context, string, uint64, string) (uint64, error)) *MockClient_GetReservableMemoryBytes_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetTask provides a mock function with given fields: ctx, upID
-func (_m *MockClient) GetTask(ctx context.Context, upID string, _ string) (*go_proxmox.Task, error) {
-	ret := _m.Called(ctx, upID)
+// GetTask provides a mock function with given fields: ctx, upID, instanceName
+func (_m *MockClient) GetTask(ctx context.Context, upID string, instanceName string) (*go_proxmox.Task, error) {
+	ret := _m.Called(ctx, upID, instanceName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetTask")
@@ -521,19 +527,19 @@ func (_m *MockClient) GetTask(ctx context.Context, upID string, _ string) (*go_p
 
 	var r0 *go_proxmox.Task
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (*go_proxmox.Task, error)); ok {
-		return rf(ctx, upID)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (*go_proxmox.Task, error)); ok {
+		return rf(ctx, upID, instanceName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) *go_proxmox.Task); ok {
-		r0 = rf(ctx, upID)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) *go_proxmox.Task); ok {
+		r0 = rf(ctx, upID, instanceName)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*go_proxmox.Task)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = rf(ctx, upID)
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, upID, instanceName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -549,13 +555,14 @@ type MockClient_GetTask_Call struct {
 // GetTask is a helper method to define mock.On call
 //   - ctx context.Context
 //   - upID string
-func (_e *MockClient_Expecter) GetTask(ctx interface{}, upID interface{}) *MockClient_GetTask_Call {
-	return &MockClient_GetTask_Call{Call: _e.mock.On("GetTask", ctx, upID)}
+//   - instanceName string
+func (_e *MockClient_Expecter) GetTask(ctx interface{}, upID interface{}, instanceName interface{}) *MockClient_GetTask_Call {
+	return &MockClient_GetTask_Call{Call: _e.mock.On("GetTask", ctx, upID, instanceName)}
 }
 
-func (_c *MockClient_GetTask_Call) Run(run func(ctx context.Context, upID string)) *MockClient_GetTask_Call {
+func (_c *MockClient_GetTask_Call) Run(run func(ctx context.Context, upID string, instanceName string)) *MockClient_GetTask_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string))
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
 	})
 	return _c
 }
@@ -565,14 +572,14 @@ func (_c *MockClient_GetTask_Call) Return(_a0 *go_proxmox.Task, _a1 error) *Mock
 	return _c
 }
 
-func (_c *MockClient_GetTask_Call) RunAndReturn(run func(context.Context, string) (*go_proxmox.Task, error)) *MockClient_GetTask_Call {
+func (_c *MockClient_GetTask_Call) RunAndReturn(run func(context.Context, string, string) (*go_proxmox.Task, error)) *MockClient_GetTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetVM provides a mock function with given fields: ctx, nodeName, vmID
-func (_m *MockClient) GetVM(ctx context.Context, nodeName string, vmID int64, _ string) (*go_proxmox.VirtualMachine, error) {
-	ret := _m.Called(ctx, nodeName, vmID)
+// GetVM provides a mock function with given fields: ctx, nodeName, vmID, instanceName
+func (_m *MockClient) GetVM(ctx context.Context, nodeName string, vmID int64, instanceName string) (*go_proxmox.VirtualMachine, error) {
+	ret := _m.Called(ctx, nodeName, vmID, instanceName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetVM")
@@ -580,19 +587,19 @@ func (_m *MockClient) GetVM(ctx context.Context, nodeName string, vmID int64, _ 
 
 	var r0 *go_proxmox.VirtualMachine
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, int64) (*go_proxmox.VirtualMachine, error)); ok {
-		return rf(ctx, nodeName, vmID)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64, string) (*go_proxmox.VirtualMachine, error)); ok {
+		return rf(ctx, nodeName, vmID, instanceName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, int64) *go_proxmox.VirtualMachine); ok {
-		r0 = rf(ctx, nodeName, vmID)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64, string) *go_proxmox.VirtualMachine); ok {
+		r0 = rf(ctx, nodeName, vmID, instanceName)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*go_proxmox.VirtualMachine)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, int64) error); ok {
-		r1 = rf(ctx, nodeName, vmID)
+	if rf, ok := ret.Get(1).(func(context.Context, string, int64, string) error); ok {
+		r1 = rf(ctx, nodeName, vmID, instanceName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -609,13 +616,14 @@ type MockClient_GetVM_Call struct {
 //   - ctx context.Context
 //   - nodeName string
 //   - vmID int64
-func (_e *MockClient_Expecter) GetVM(ctx interface{}, nodeName interface{}, vmID interface{}) *MockClient_GetVM_Call {
-	return &MockClient_GetVM_Call{Call: _e.mock.On("GetVM", ctx, nodeName, vmID)}
+//   - instanceName string
+func (_e *MockClient_Expecter) GetVM(ctx interface{}, nodeName interface{}, vmID interface{}, instanceName interface{}) *MockClient_GetVM_Call {
+	return &MockClient_GetVM_Call{Call: _e.mock.On("GetVM", ctx, nodeName, vmID, instanceName)}
 }
 
-func (_c *MockClient_GetVM_Call) Run(run func(ctx context.Context, nodeName string, vmID int64)) *MockClient_GetVM_Call {
+func (_c *MockClient_GetVM_Call) Run(run func(ctx context.Context, nodeName string, vmID int64, instanceName string)) *MockClient_GetVM_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(int64))
+		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].(string))
 	})
 	return _c
 }
@@ -625,7 +633,7 @@ func (_c *MockClient_GetVM_Call) Return(_a0 *go_proxmox.VirtualMachine, _a1 erro
 	return _c
 }
 
-func (_c *MockClient_GetVM_Call) RunAndReturn(run func(context.Context, string, int64) (*go_proxmox.VirtualMachine, error)) *MockClient_GetVM_Call {
+func (_c *MockClient_GetVM_Call) RunAndReturn(run func(context.Context, string, int64, string) (*go_proxmox.VirtualMachine, error)) *MockClient_GetVM_Call {
 	_c.Call.Return(run)
 	return _c
 }

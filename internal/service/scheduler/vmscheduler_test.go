@@ -177,9 +177,9 @@ func TestScheduleVM(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	fakeProxmoxClient.EXPECT().GetReservableMemoryBytes(context.Background(), "pve1", uint64(100)).Return(miBytes(60), nil)
-	fakeProxmoxClient.EXPECT().GetReservableMemoryBytes(context.Background(), "pve2", uint64(100)).Return(miBytes(20), nil)
-	fakeProxmoxClient.EXPECT().GetReservableMemoryBytes(context.Background(), "pve3", uint64(100)).Return(miBytes(20), nil)
+	fakeProxmoxClient.EXPECT().GetReservableMemoryBytes(context.Background(), "pve1", uint64(100), "").Return(miBytes(60), nil)
+	fakeProxmoxClient.EXPECT().GetReservableMemoryBytes(context.Background(), "pve2", uint64(100), "").Return(miBytes(20), nil)
+	fakeProxmoxClient.EXPECT().GetReservableMemoryBytes(context.Background(), "pve3", uint64(100), "").Return(miBytes(20), nil)
 
 	node, err := ScheduleVM(context.Background(), machineScope)
 	require.NoError(t, err)
