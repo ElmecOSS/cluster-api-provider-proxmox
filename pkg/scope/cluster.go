@@ -144,9 +144,8 @@ func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (capmox.Client, e
 		return s.setupDefaultProxmoxCluster(ctx)
 	}
 	var (
-		urls          []string
-		instanceNames []string
-		options       []proxmox.Option
+		clients   = map[string]*proxmox.Client{}
+		apiClient = &goproxmox.APIClient{}
 	)
 	for i, instance := range s.ProxmoxCluster.Spec.Settings.Instances {
 		secret := corev1.Secret{}
@@ -171,12 +170,15 @@ func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (capmox.Client, e
 		if err != nil {
 			return nil, err
 		}
-		urls = append(urls, prxCred.URL)
-		options = append(options, proxmox.WithHTTPClient(prxCred.HTTPClient),
-			proxmox.WithAPIToken(prxCred.Token, prxCred.TokenSecret))
-		instanceNames = append(instanceNames, instance.Name)
+		if apiClient, err = goproxmox.NewAPIClient(ctx, *s.Logger, prxCred.URL, instance.Name,
+			proxmox.WithHTTPClient(prxCred.HTTPClient),
+			proxmox.WithAPIToken(prxCred.Token, prxCred.TokenSecret),
+		); err != nil {
+			return nil, errors.Wrapf(err, "failed to create Proxmox client for instance %s", instance.Name)
+		}
+		clients[instance.Name] = apiClient.GetClient(instance.Name)
 	}
-	return goproxmox.NewAPIClientForMultiInstances(ctx, *s.Logger, urls, instanceNames, options)
+	return apiClient.SetClient(clients), nil
 }
 
 func (s *ClusterScope) setupDefaultProxmoxCluster(ctx context.Context) (capmox.Client, error) {
@@ -202,7 +204,7 @@ func (s *ClusterScope) setupDefaultProxmoxCluster(ctx context.Context) (capmox.C
 	if err != nil {
 		return nil, err
 	}
-	return goproxmox.NewAPIClient(ctx, *s.Logger, prxCred.URL,
+	return goproxmox.NewAPIClient(ctx, *s.Logger, prxCred.URL, goproxmox.DefaultInstanceName,
 		proxmox.WithHTTPClient(prxCred.HTTPClient),
 		proxmox.WithAPIToken(prxCred.Token, prxCred.TokenSecret),
 	)

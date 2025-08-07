@@ -259,7 +259,7 @@ func TestProxmoxAPIClient_ConfigureVM(t *testing.T) {
 				newJSONResponder(200,
 					proxmox.NodeStatuses{{Name: "test"}, {Name: "test2"}}))
 
-			node, err := client.getClient("").Node(context.Background(), "test")
+			node, err := client.GetClient("").Node(context.Background(), "test")
 			require.NoError(t, err)
 			vm, err := node.VirtualMachine(context.Background(), 101)
 			require.NoError(t, err)
