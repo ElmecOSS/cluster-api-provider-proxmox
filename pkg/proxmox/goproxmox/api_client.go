@@ -375,29 +375,26 @@ func (c *APIClient) UnmountCloudInitISO(ctx context.Context, vm *proxmox.Virtual
 	return err
 }
 
+// TODO do
 // CloudInitStatus returns the cloud-init status of the VM.
 func (c *APIClient) CloudInitStatus(ctx context.Context, vm *proxmox.VirtualMachine) (running bool, err error) {
 	if err := c.QemuAgentStatus(ctx, vm); err != nil {
 		return false, errors.Wrap(err, "error waiting for agent")
 	}
-
 	pid, err := vm.AgentExec(ctx, []string{"cloud-init", "status"}, "")
 	if err != nil {
 		return false, errors.Wrap(err, "unable to get cloud-init status")
 	}
-
 	status, err := vm.WaitForAgentExecExit(ctx, pid, 2)
 	if err != nil {
 		return false, errors.Wrap(err, "unable to wait for agent exec")
 	}
-
 	if status.Exited == 1 && status.ExitCode == 0 && strings.Contains(status.OutData, "running") {
 		return true, nil
 	}
 	if status.Exited == 1 && status.ExitCode != 0 {
 		return false, ErrCloudInitFailed
 	}
-
 	return false, nil
 }
 

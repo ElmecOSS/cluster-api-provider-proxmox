@@ -19,7 +19,6 @@ package vmservice
 import (
 	"context"
 	"fmt"
-
 	"github.com/luthermonson/go-proxmox"
 	"github.com/pkg/errors"
 	"k8s.io/utils/ptr"
@@ -118,6 +117,7 @@ func updateVMLocation(ctx context.Context, s *scope.MachineScope) error {
 		machineName,
 		vm.Node,
 		util.IsControlPlaneMachine(s.Machine),
+		instanceName,
 	)
 
 	if updated {

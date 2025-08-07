@@ -185,7 +185,6 @@ func ensureVirtualMachine(ctx context.Context, machineScope *scope.MachineScope)
 		// make sure spec.VirtualMachineID is always set.
 		machineScope.ProxmoxMachine.Status.TaskRef = ptr.To(string(resp.Task.UPID))
 		machineScope.SetVirtualMachineID(resp.NewID)
-
 		return true, nil
 	}
 

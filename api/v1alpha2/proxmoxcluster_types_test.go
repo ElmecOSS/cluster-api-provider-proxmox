@@ -35,7 +35,7 @@ func TestUpdateNodeLocation(t *testing.T) {
 		Status: ProxmoxClusterStatus{},
 	}
 
-	res := cl.UpdateNodeLocation("new", "n1", false)
+	res := cl.UpdateNodeLocation("new", "n1", false, "prx1")
 	require.NotNil(t, cl.Status.NodeLocations)
 	require.Len(t, cl.Status.NodeLocations.Workers, 1)
 	require.True(t, res)
@@ -59,17 +59,17 @@ func TestUpdateNodeLocation(t *testing.T) {
 
 	cl.Status.NodeLocations = locs
 
-	res = cl.UpdateNodeLocation("m1", "n2", false)
+	res = cl.UpdateNodeLocation("m1", "n2", false, "")
 	require.True(t, res)
 	require.Len(t, cl.Status.NodeLocations.Workers, 3)
 	require.Equal(t, cl.Status.NodeLocations.Workers[0].Node, "n2")
 
-	res = cl.UpdateNodeLocation("m4", "n4", false)
+	res = cl.UpdateNodeLocation("m4", "n4", false, "")
 	require.True(t, res)
 	require.Len(t, cl.Status.NodeLocations.Workers, 4)
 	require.Equal(t, cl.Status.NodeLocations.Workers[3].Node, "n4")
 
-	res = cl.UpdateNodeLocation("m2", "n2", false)
+	res = cl.UpdateNodeLocation("m2", "n2", false, "")
 	require.False(t, res)
 	require.Len(t, cl.Status.NodeLocations.Workers, 4)
 }
@@ -222,7 +222,7 @@ func TestRemoveNodeLocation(t *testing.T) {
 	require.Len(t, cl.Status.NodeLocations.Workers, 2)
 	require.Equal(t, cl.Status.NodeLocations.Workers[0].Node, "n2")
 
-	cl.UpdateNodeLocation("m4", "n4", true)
+	cl.UpdateNodeLocation("m4", "n4", true, "")
 	require.Len(t, cl.Status.NodeLocations.ControlPlane, 1)
 
 	cl.RemoveNodeLocation("m4", true)

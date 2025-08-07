@@ -111,8 +111,30 @@ func Convert_v1alpha2_ProxmoxMachineSpec_To_v1alpha1_ProxmoxMachineSpec(in *v1al
 	out.AllowedNodes = in.AllowedNodes
 	out.Tags = in.Tags
 
-	// todo template selector
 	// instance is not supported in v1alpha1, so we ignore it
+
+	return nil
+}
+
+func Convert_v1alpha2_ProxmoxClusterStatus_To_v1alpha1_ProxmoxClusterStatus(in *v1alpha2.ProxmoxClusterStatus, out *ProxmoxClusterStatus, s conversion_machinery.Scope) error {
+	out.Ready = in.Ready
+	out.InClusterIPPoolRef = in.InClusterIPPoolRef
+	if err := Convert_v1alpha2_NodeLocations_To_v1alpha1_NodeLocations(in.NodeLocations, out.NodeLocations, s); err != nil {
+		return err
+	}
+	out.FailureReason = in.FailureReason
+	out.FailureMessage = in.FailureMessage
+	out.Conditions = in.Conditions
+
+	// Instances field is not supported in v1alpha1, so we ignore it
+	return nil
+}
+
+func Convert_v1alpha2_NodeLocation_To_v1alpha1_NodeLocation(in *v1alpha2.NodeLocation, out *NodeLocation, s conversion_machinery.Scope) error {
+	out.Machine = in.Machine
+	out.Node = in.Node
+
+	// The NodeLocation in v1alpha1 does not have an Instance field, so we can ignore it
 
 	return nil
 }

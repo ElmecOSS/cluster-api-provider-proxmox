@@ -2110,6 +2110,10 @@ spec:
                         NodeLocation holds information about a single VM
                         in Proxmox.
                       properties:
+                        instance:
+                          description: Instance is the name of the Proxmox instance
+                            this node belongs to.
+                          type: string
                         machine:
                           description: Machine is the reference to the ProxmoxMachine.
                           properties:
@@ -2128,6 +2132,7 @@ spec:
                           description: Node is the Proxmox node.
                           type: string
                       required:
+                      - instance
                       - machine
                       - node
                       type: object
@@ -2139,6 +2144,10 @@ spec:
                         NodeLocation holds information about a single VM
                         in Proxmox.
                       properties:
+                        instance:
+                          description: Instance is the name of the Proxmox instance
+                            this node belongs to.
+                          type: string
                         machine:
                           description: Machine is the reference to the ProxmoxMachine.
                           properties:
@@ -2157,6 +2166,7 @@ spec:
                           description: Node is the Proxmox node.
                           type: string
                       required:
+                      - instance
                       - machine
                       - node
                       type: object

@@ -291,6 +291,9 @@ type NodeLocation struct {
 
 	// Node is the Proxmox node.
 	Node string `json:"node"`
+
+	// Instance is the name of the Proxmox instance this node belongs to.
+	Instance string `json:"instance"`
 }
 
 // +kubebuilder:object:root=true
@@ -401,11 +404,12 @@ func (c *ProxmoxCluster) RemoveNodeLocation(machineName string, isControlPlane b
 // If the node location does not exist, it will be added.
 //
 // The function returns true if the value was added or updated, otherwise false.
-func (c *ProxmoxCluster) UpdateNodeLocation(machineName, node string, isControlPlane bool) bool {
+func (c *ProxmoxCluster) UpdateNodeLocation(machineName, node string, isControlPlane bool, instanceName string) bool {
 	if !c.HasMachine(machineName, isControlPlane) {
 		loc := NodeLocation{
-			Node:    node,
-			Machine: corev1.LocalObjectReference{Name: machineName},
+			Node:     node,
+			Machine:  corev1.LocalObjectReference{Name: machineName},
+			Instance: instanceName,
 		}
 		c.AddNodeLocation(loc, isControlPlane)
 		return true
@@ -471,6 +475,7 @@ func init() {
 	objectTypes = append(objectTypes, &ProxmoxCluster{}, &ProxmoxClusterList{})
 }
 
+// GetNodesForInstance
 func (c *ProxmoxCluster) GetNodesForInstance(instanceName string) []string {
 	if c.Spec.Settings == nil || c.Spec.Settings.Mode == DefaultMode {
 		return c.Spec.AllowedNodes
