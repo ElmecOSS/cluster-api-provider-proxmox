@@ -79,6 +79,11 @@ func ReconcileVM(ctx context.Context, scope *scope.MachineScope) (infrav1.Virtua
 		return vm, err
 	} // VirtualMachineProvisioned reason is Cloning
 
+	// Detect VMs that were manually migrated to a different Proxmox node.
+	if err := reconcileNodeDrift(ctx, scope); err != nil {
+		return vm, err
+	}
+
 	if requeue, err := reconcileVirtualMachineConfig(ctx, scope); err != nil || requeue {
 		scope.Logger.V(4).Info("after reconcileVirtualMachineCOnfig", "machineName", scope.ProxmoxMachine.GetName(), "requeue", requeue, "err", err)
 		return vm, err
@@ -245,6 +250,44 @@ func ensureVirtualMachine(ctx context.Context, machineScope *scope.MachineScope)
 
 	// at this point the VM is found, so err must be nil
 	return false, nil
+}
+
+// reconcileNodeDrift checks whether the VM's actual Proxmox node matches the
+// node stored in Status.ProxmoxNode. If the VM was manually migrated, this
+// updates the status and NodeLocations so that the scheduler and deletion
+// logic operate on the correct node.
+func reconcileNodeDrift(ctx context.Context, machineScope *scope.MachineScope) error {
+	vmID := machineScope.ProxmoxMachine.GetVirtualMachineID()
+	if vmID <= 0 {
+		return nil
+	}
+
+	storedNode := machineScope.LocateProxmoxNode()
+	if storedNode == "" {
+		return nil
+	}
+
+	rsc, err := machineScope.InfraCluster.ProxmoxClient.FindVMResource(ctx, uint64(vmID))
+	if err != nil {
+		// VM not found cluster-wide — let the normal reconcile handle it.
+		return nil
+	}
+
+	if rsc.Node == storedNode {
+		return nil
+	}
+
+	machineScope.Logger.Info("VM migrated to a different node",
+		"vmID", vmID,
+		"previousNode", storedNode,
+		"currentNode", rsc.Node,
+	)
+
+	machineScope.ProxmoxMachine.Status.ProxmoxNode = ptr.To(rsc.Node)
+	machineScope.InfraCluster.ProxmoxCluster.UpdateNodeLocation(
+		machineScope.Name(), rsc.Node, util.IsControlPlaneMachine(machineScope.Machine))
+
+	return machineScope.InfraCluster.PatchObject()
 }
 
 func reconcileDisks(ctx context.Context, machineScope *scope.MachineScope) error {

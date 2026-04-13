@@ -38,9 +38,21 @@ func DeleteVM(ctx context.Context, machineScope *scope.MachineScope) error {
 
 	if _, err := machineScope.InfraCluster.ProxmoxClient.DeleteVM(ctx, node, vmID); err != nil {
 		if VMNotFound(err) || errors.Is(err, goproxmox.ErrVMIDFree) {
-			// remove machine from cluster status
+			// The VM was not found on the expected node. Before assuming it was
+			// already deleted, search the entire cluster — the VM may have been
+			// manually migrated to another node.
+			rsc, findErr := machineScope.InfraCluster.ProxmoxClient.FindVMResource(ctx, uint64(vmID))
+			if findErr == nil {
+				// VM still exists on a different node. Update the tracked location
+				// so the next reconcile-triggered delete targets the correct node.
+				machineScope.ProxmoxMachine.Status.ProxmoxNode = &rsc.Node
+				machineScope.InfraCluster.ProxmoxCluster.UpdateNodeLocation(
+					machineScope.Name(), rsc.Node, util.IsControlPlaneMachine(machineScope.Machine))
+				return errors.Errorf("VM %d was migrated to node %s, retrying deletion", vmID, rsc.Node)
+			}
+
+			// VM truly gone from the entire cluster — safe to clean up.
 			machineScope.InfraCluster.ProxmoxCluster.RemoveNodeLocation(machineScope.Name(), util.IsControlPlaneMachine(machineScope.Machine))
-			// The VM is deleted so remove the finalizer.
 			ctrlutil.RemoveFinalizer(machineScope.ProxmoxMachine, infrav1.MachineFinalizer)
 			return machineScope.InfraCluster.PatchObject()
 		}

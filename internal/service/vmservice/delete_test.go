@@ -19,8 +19,10 @@ package vmservice
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/luthermonson/go-proxmox"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
@@ -38,8 +40,40 @@ func TestDeleteVM_SuccessNotFound(t *testing.T) {
 	}, false)
 
 	proxmoxClient.EXPECT().DeleteVM(context.TODO(), "node1", int64(123)).Return(nil, errors.New("vm does not exist: some reason")).Once()
+	// VM not found cluster-wide either — truly deleted.
+	proxmoxClient.EXPECT().FindVMResource(context.TODO(), uint64(123)).Return(nil, fmt.Errorf("not found")).Once()
 
 	require.NoError(t, DeleteVM(context.TODO(), machineScope))
 	require.Empty(t, machineScope.ProxmoxMachine.Finalizers)
 	require.Empty(t, machineScope.InfraCluster.ProxmoxCluster.GetNode(machineScope.Name(), false))
+}
+
+func TestDeleteVM_VMNotFoundButMigrated(t *testing.T) {
+	machineScope, proxmoxClient, _ := setupReconcilerTest(t)
+	vm := newRunningVM()
+	machineScope.ProxmoxMachine.Spec.VirtualMachineID = ptr.To(int64(vm.VMID))
+	machineScope.ProxmoxMachine.Status.ProxmoxNode = ptr.To("node1")
+	machineScope.InfraCluster.ProxmoxCluster.AddNodeLocation(infrav1.NodeLocation{
+		Machine: corev1.LocalObjectReference{Name: machineScope.Name()},
+		Node:    "node1",
+	}, false)
+
+	// DeleteVM fails on old node.
+	proxmoxClient.EXPECT().DeleteVM(context.TODO(), "node1", int64(123)).Return(nil, errors.New("vm does not exist")).Once()
+	// But FindVMResource discovers VM on node2.
+	proxmoxClient.EXPECT().FindVMResource(context.TODO(), uint64(123)).Return(&proxmox.ClusterResource{
+		Node: "node2",
+		VMID: 123,
+	}, nil).Once()
+
+	err := DeleteVM(context.TODO(), machineScope)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "migrated to node node2")
+
+	// Status should be updated to the new node.
+	require.Equal(t, "node2", *machineScope.ProxmoxMachine.Status.ProxmoxNode)
+	require.Equal(t, "node2", machineScope.InfraCluster.ProxmoxCluster.GetNode(machineScope.Name(), false))
+
+	// Finalizer should NOT be removed — VM still exists.
+	require.NotEmpty(t, machineScope.ProxmoxMachine.Finalizers)
 }

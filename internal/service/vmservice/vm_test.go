@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"testing"
 
+	goproxmoxlib "github.com/luthermonson/go-proxmox"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
@@ -42,6 +44,7 @@ func TestReconcileVM_EverythingReady(t *testing.T) {
 	machineScope.ProxmoxMachine.Status.Initialization.Provisioned = ptr.To(true)
 
 	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().FindVMResource(context.Background(), uint64(123)).Return(&goproxmoxlib.ClusterResource{Node: "node1", VMID: 123}, nil).Maybe()
 	proxmoxClient.EXPECT().CloudInitStatus(context.Background(), vm).Return(false, nil).Once()
 	proxmoxClient.EXPECT().QemuAgentStatus(context.Background(), vm).Return(nil).Once()
 
@@ -63,6 +66,7 @@ func TestReconcileVM_QemuAgentCheckDisabled(t *testing.T) {
 	}
 
 	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().FindVMResource(context.Background(), uint64(123)).Return(&goproxmoxlib.ClusterResource{Node: "node1", VMID: 123}, nil).Maybe()
 	// proxmoxClient.EXPECT().CloudInitStatus(context.Background(), vm).Return(false, nil).Once()
 
 	result, err := ReconcileVM(context.Background(), machineScope)
@@ -83,6 +87,7 @@ func TestReconcileVM_CloudInitCheckDisabled(t *testing.T) {
 	}
 
 	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().FindVMResource(context.Background(), uint64(123)).Return(&goproxmoxlib.ClusterResource{Node: "node1", VMID: 123}, nil).Maybe()
 	proxmoxClient.EXPECT().QemuAgentStatus(context.Background(), vm).Return(nil)
 
 	result, err := ReconcileVM(context.Background(), machineScope)
@@ -104,6 +109,7 @@ func TestReconcileVM_InitCheckDisabled(t *testing.T) {
 	}
 
 	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().FindVMResource(context.Background(), uint64(123)).Return(&goproxmoxlib.ClusterResource{Node: "node1", VMID: 123}, nil).Maybe()
 
 	result, err := ReconcileVM(context.Background(), machineScope)
 	require.NoError(t, err)
@@ -396,6 +402,7 @@ func TestEnsureVirtualMachine_FindVM(t *testing.T) {
 	vm.VirtualMachineConfig.SMBios1 = "uuid=56603c36-46b9-4608-90ae-c731c15eae64"
 
 	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().FindVMResource(context.Background(), uint64(123)).Return(&goproxmoxlib.ClusterResource{Node: "node1", VMID: 123}, nil).Maybe()
 
 	requeue, err := ensureVirtualMachine(context.Background(), machineScope)
 	require.NoError(t, err)
@@ -662,6 +669,7 @@ func TestReconcileVM_CloudInitFailed(t *testing.T) {
 	machineScope.ProxmoxMachine.Status.Initialization.Provisioned = ptr.To(true)
 
 	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().FindVMResource(context.Background(), uint64(123)).Return(&goproxmoxlib.ClusterResource{Node: "node1", VMID: 123}, nil).Maybe()
 	proxmoxClient.EXPECT().CloudInitStatus(context.Background(), vm).Return(false, goproxmox.ErrCloudInitFailed).Once()
 	proxmoxClient.EXPECT().QemuAgentStatus(context.Background(), vm).Return(nil).Once()
 
@@ -688,10 +696,48 @@ func TestReconcileVM_CloudInitRunning(t *testing.T) {
 	machineScope.ProxmoxMachine.Status.Initialization.Provisioned = ptr.To(true)
 
 	proxmoxClient.EXPECT().GetVM(context.Background(), "node1", int64(123)).Return(vm, nil).Once()
+	proxmoxClient.EXPECT().FindVMResource(context.Background(), uint64(123)).Return(&goproxmoxlib.ClusterResource{Node: "node1", VMID: 123}, nil).Maybe()
 	proxmoxClient.EXPECT().CloudInitStatus(context.Background(), vm).Return(true, nil).Once()
 	proxmoxClient.EXPECT().QemuAgentStatus(context.Background(), vm).Return(nil).Once()
 
 	result, err := ReconcileVM(context.Background(), machineScope)
 	require.NoError(t, err)
 	require.Equal(t, infrav1.VirtualMachineStatePending, result.State)
+}
+
+func TestReconcileNodeDrift_NoChange(t *testing.T) {
+	machineScope, proxmoxClient, _ := setupReconcilerTest(t)
+	machineScope.ProxmoxMachine.Spec.VirtualMachineID = ptr.To(int64(123))
+	machineScope.ProxmoxMachine.Status.ProxmoxNode = ptr.To("node1")
+
+	// VM is on the expected node.
+	proxmoxClient.EXPECT().FindVMResource(context.Background(), uint64(123)).Return(
+		&goproxmoxlib.ClusterResource{Node: "node1", VMID: 123}, nil).Once()
+
+	require.NoError(t, reconcileNodeDrift(context.Background(), machineScope))
+	require.Equal(t, "node1", *machineScope.ProxmoxMachine.Status.ProxmoxNode)
+}
+
+func TestReconcileNodeDrift_Migrated(t *testing.T) {
+	machineScope, proxmoxClient, _ := setupReconcilerTest(t)
+	machineScope.ProxmoxMachine.Spec.VirtualMachineID = ptr.To(int64(123))
+	machineScope.ProxmoxMachine.Status.ProxmoxNode = ptr.To("node1")
+	machineScope.InfraCluster.ProxmoxCluster.AddNodeLocation(infrav1.NodeLocation{
+		Machine: corev1.LocalObjectReference{Name: machineScope.Name()},
+		Node:    "node1",
+	}, false)
+
+	// VM was migrated to node2.
+	proxmoxClient.EXPECT().FindVMResource(context.Background(), uint64(123)).Return(
+		&goproxmoxlib.ClusterResource{Node: "node2", VMID: 123}, nil).Once()
+
+	require.NoError(t, reconcileNodeDrift(context.Background(), machineScope))
+	require.Equal(t, "node2", *machineScope.ProxmoxMachine.Status.ProxmoxNode)
+	require.Equal(t, "node2", machineScope.InfraCluster.ProxmoxCluster.GetNode(machineScope.Name(), false))
+}
+
+func TestReconcileNodeDrift_NoVMID(t *testing.T) {
+	machineScope, _, _ := setupReconcilerTest(t)
+	// No VMID set — should be a noop.
+	require.NoError(t, reconcileNodeDrift(context.Background(), machineScope))
 }
