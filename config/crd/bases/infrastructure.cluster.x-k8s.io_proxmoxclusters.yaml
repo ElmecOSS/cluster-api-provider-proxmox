@@ -844,6 +844,12 @@ spec:
                   SchedulerHints allows to influence the decision on where a VM will be scheduled. For example by applying a multiplicator
                   to a node's resources, to allow for overprovisioning or to ensure a node will always have a safety buffer.
                 properties:
+                  cpuAdjustment:
+                    description: |-
+                      CPUAdjustment allows to adjust a node's CPU capacity by a given percentage.
+                      Setting it to 0 entirely disables scheduling CPU constraints (default).
+                    format: int64
+                    type: integer
                   memoryAdjustment:
                     description: |-
                       MemoryAdjustment allows to adjust a node's memory by a given percentage.
@@ -1226,6 +1232,17 @@ spec:
                   schedulerHints allows to influence the decision on where a VM will be scheduled. For example by applying a multiplicator
                   to a node's resources, to allow for overprovisioning or to ensure a node will always have a safety buffer.
                 properties:
+                  cpuAdjustment:
+                    description: |-
+                      cpuAdjustment allows to adjust a node's CPU capacity by a given percentage.
+                      For example, setting it to 300 allows to allocate 300% of a host's CPU cores for VMs (3:1 overcommit),
+                      and setting it to 100 limits CPU allocation to the physical core count (no overcommit).
+                      Setting it to 0 entirely disables scheduling CPU constraints (default).
+                      When enabled, the scheduler uses a saturation-based algorithm that balances both
+                      CPU and memory utilization across nodes, preventing CPU hotspots on heterogeneous clusters.
+                    format: int64
+                    minimum: 0
+                    type: integer
                   memoryAdjustment:
                     description: |-
                       memoryAdjustment allows to adjust a node's memory by a given percentage.

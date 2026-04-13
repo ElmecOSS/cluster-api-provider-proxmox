@@ -44,6 +44,19 @@ func (err InsufficientMemoryError) Error() string {
 		err.requested, err.node, err.available)
 }
 
+// InsufficientCPUError is used when the scheduler cannot assign a VM to a node because it would
+// exceed the node's CPU core limit.
+type InsufficientCPUError struct {
+	node      string
+	available int
+	requested int
+}
+
+func (err InsufficientCPUError) Error() string {
+	return fmt.Sprintf("cannot reserve %d CPU cores on node %s: %d available cores left",
+		err.requested, err.node, err.available)
+}
+
 // ScheduleVM decides which node to a ProxmoxMachine should be scheduled on.
 // It requires the machine's ProxmoxCluster to have at least 1 allowed node.
 func ScheduleVM(ctx context.Context, machineScope *scope.MachineScope) (string, error) {
@@ -72,20 +85,54 @@ func selectNode(
 	allowedNodes []string,
 	schedulerHints *infrav1.SchedulerHints,
 ) (string, error) {
-	byMemory := make(sortByAvailableMemory, len(allowedNodes))
+	cpuAdjustment := schedulerHints.GetCPUAdjustment()
+	cpuAware := cpuAdjustment > 0
+
+	nodes := make([]nodeInfo, len(allowedNodes))
 	for i, nodeName := range allowedNodes {
-		mem, err := client.GetReservableMemoryBytes(ctx, nodeName, schedulerHints.GetMemoryAdjustment())
+		mem, allocMem, err := client.GetReservableMemoryBytes(ctx, nodeName, schedulerHints.GetMemoryAdjustment())
 		if err != nil {
 			return "", err
 		}
-		byMemory[i] = nodeInfo{Name: nodeName, AvailableMemory: mem}
+
+		var cpus, allocCPUs int
+		if cpuAware {
+			cpus, allocCPUs, err = client.GetReservableCPUCores(ctx, nodeName, cpuAdjustment)
+			if err != nil {
+				return "", err
+			}
+		}
+
+		nodes[i] = nodeInfo{
+			Name:              nodeName,
+			AvailableMemory:   mem,
+			AllocatableMemory: allocMem,
+			AvailableCPUs:     cpus,
+			AllocatableCPUs:   allocCPUs,
+		}
 	}
 
+	requestedMemory := uint64(ptr.Deref(machine.Spec.MemoryMiB, 0)) * 1024 * 1024
+	requestedCPUs := int(ptr.Deref(machine.Spec.NumSockets, 0)) * int(ptr.Deref(machine.Spec.NumCores, 0))
+
+	if cpuAware {
+		return selectNodeBySaturation(ctx, nodes, locations, requestedMemory, requestedCPUs)
+	}
+
+	return selectNodeByRoundRobin(ctx, nodes, locations, requestedMemory)
+}
+
+// selectNodeByRoundRobin is the legacy scheduling algorithm: round-robin by VM count with memory as the only constraint.
+func selectNodeByRoundRobin(
+	ctx context.Context,
+	nodes []nodeInfo,
+	locations []infrav1.NodeLocation,
+	requestedMemory uint64,
+) (string, error) {
+	byMemory := sortByAvailableMemory(nodes)
 	sort.Sort(byMemory)
 
-	requestedMemory := uint64(ptr.Deref(machine.Spec.MemoryMiB, 0)) * 1024 * 1024 // convert to bytes
 	if requestedMemory > byMemory[0].AvailableMemory {
-		// no more space on the node with the highest amount of available memory
 		return "", InsufficientMemoryError{
 			node:      byMemory[0].Name,
 			available: byMemory[0].AvailableMemory,
@@ -93,7 +140,6 @@ func selectNode(
 		}
 	}
 
-	// count the existing vms per node
 	nodeCounter := make(map[string]int)
 	for _, nl := range locations {
 		nodeCounter[nl.Node]++
@@ -106,12 +152,10 @@ func selectNode(
 
 	byReplicas := make(sortByReplicas, len(byMemory))
 	copy(byReplicas, byMemory)
-
 	sort.Sort(byReplicas)
 
 	decision := byMemory[0].Name
 	for _, info := range byReplicas {
-		// distribute round-robin when memory allows it
 		if requestedMemory < info.AvailableMemory {
 			decision = info.Name
 			break
@@ -119,8 +163,7 @@ func selectNode(
 	}
 
 	if logger := logr.FromContextOrDiscard(ctx); logger.V(4).Enabled() {
-		// only construct values when message should actually be logged
-		logger.Info("Scheduler decision",
+		logger.Info("Scheduler decision (round-robin)",
 			"byReplicas", byReplicas.String(),
 			"byMemory", byMemory.String(),
 			"requestedMemory", requestedMemory,
@@ -131,14 +174,123 @@ func selectNode(
 	return decision, nil
 }
 
+// selectNodeBySaturation selects the node with the lowest bottleneck saturation ratio.
+// The bottleneck is the maximum of CPU saturation and memory saturation for each node.
+// This ensures VMs are distributed proportionally to each node's actual capacity.
+func selectNodeBySaturation(
+	ctx context.Context,
+	nodes []nodeInfo,
+	locations []infrav1.NodeLocation,
+	requestedMemory uint64,
+	requestedCPUs int,
+) (string, error) {
+	// Filter nodes that can fit the VM on both dimensions.
+	var candidates []nodeInfo
+	for _, n := range nodes {
+		memFits := requestedMemory <= n.AvailableMemory
+		cpuFits := requestedCPUs <= n.AvailableCPUs
+
+		if memFits && cpuFits {
+			candidates = append(candidates, n)
+		}
+	}
+
+	if len(candidates) == 0 {
+		// Find the best error to report: which resource is the tightest?
+		sort.Sort(sortByAvailableMemory(nodes))
+		if requestedMemory > nodes[0].AvailableMemory {
+			return "", InsufficientMemoryError{
+				node:      nodes[0].Name,
+				available: nodes[0].AvailableMemory,
+				requested: requestedMemory,
+			}
+		}
+		// Memory fits somewhere but CPU doesn't — find node with most CPU headroom.
+		bestCPU := nodes[0]
+		for _, n := range nodes[1:] {
+			if n.AvailableCPUs > bestCPU.AvailableCPUs {
+				bestCPU = n
+			}
+		}
+		return "", InsufficientCPUError{
+			node:      bestCPU.Name,
+			available: bestCPU.AvailableCPUs,
+			requested: requestedCPUs,
+		}
+	}
+
+	// Compute the bottleneck saturation for each candidate after placement.
+	// saturation = (allocated + requested) / allocatable = 1 - (available - requested) / allocatable
+	// The bottleneck is the resource with the highest saturation (closest to full).
+	// We pick the node with the lowest bottleneck (least saturated overall).
+	type scored struct {
+		nodeInfo
+		bottleneck float64
+	}
+
+	var scoredCandidates []scored
+	for _, n := range candidates {
+		cpuSat := float64(0)
+		if n.AllocatableCPUs > 0 {
+			cpuSat = 1.0 - float64(n.AvailableCPUs-requestedCPUs)/float64(n.AllocatableCPUs)
+		}
+
+		memSat := float64(0)
+		if n.AllocatableMemory > 0 {
+			memSat = 1.0 - float64(n.AvailableMemory-requestedMemory)/float64(n.AllocatableMemory)
+		}
+
+		// Bottleneck is the tighter resource (highest saturation).
+		bottleneck := memSat
+		if cpuSat > memSat {
+			bottleneck = cpuSat
+		}
+
+		scoredCandidates = append(scoredCandidates, scored{nodeInfo: n, bottleneck: bottleneck})
+	}
+
+	// Sort by bottleneck ascending (least saturated first).
+	sort.Slice(scoredCandidates, func(i, j int) bool {
+		return scoredCandidates[i].bottleneck < scoredCandidates[j].bottleneck
+	})
+
+	decision := scoredCandidates[0].Name
+
+	if logger := logr.FromContextOrDiscard(ctx); logger.V(4).Enabled() {
+		type logEntry struct {
+			Node  string  `json:"node"`
+			Mem   uint64  `json:"availMem"`
+			CPU   int     `json:"availCpu"`
+			Score float64 `json:"score"`
+		}
+		entries := make([]logEntry, len(scoredCandidates))
+		for i, sc := range scoredCandidates {
+			entries[i] = logEntry{Node: sc.Name, Mem: sc.AvailableMemory, CPU: sc.AvailableCPUs, Score: sc.bottleneck}
+		}
+		data, _ := json.Marshal(entries)
+		logger.Info("Scheduler decision (saturation)",
+			"candidates", string(data),
+			"requestedMemory", requestedMemory,
+			"requestedCPUs", requestedCPUs,
+			"resultNode", decision,
+		)
+	}
+
+	return decision, nil
+}
+
 type resourceClient interface {
-	GetReservableMemoryBytes(context.Context, string, int64) (uint64, error)
+	GetReservableMemoryBytes(context.Context, string, int64) (available uint64, allocatable uint64, err error)
+	GetReservableCPUCores(context.Context, string, int64) (available int, allocatable int, err error)
 }
 
 type nodeInfo struct {
-	Name            string `json:"node"`
-	AvailableMemory uint64 `json:"mem"`
-	ScheduledVMs    int    `json:"vms"`
+	Name              string `json:"node"`
+	AvailableMemory   uint64 `json:"mem"`
+	AllocatableMemory uint64 `json:"allocMem"`
+	AvailableCPUs     int    `json:"cpu"`
+	AllocatableCPUs   int    `json:"allocCpu"`
+	ScheduledVMs      int    `json:"vms"`
 }
 
 type sortByReplicas []nodeInfo

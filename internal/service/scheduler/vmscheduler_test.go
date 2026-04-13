@@ -38,10 +38,48 @@ import (
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/scope"
 )
 
-type fakeResourceClient map[string]uint64
+type fakeResourceClient struct {
+	memory      map[string]uint64
+	memoryTotal map[string]uint64
+	cpus        map[string]int
+	cpusTotal   map[string]int
+}
 
-func (c fakeResourceClient) GetReservableMemoryBytes(_ context.Context, nodeName string, _ int64) (uint64, error) {
-	return c[nodeName], nil
+func (c fakeResourceClient) GetReservableMemoryBytes(_ context.Context, nodeName string, _ int64) (uint64, uint64, error) {
+	total := c.memoryTotal[nodeName]
+	if total == 0 {
+		total = c.memory[nodeName] // fallback: treat available as total for legacy tests
+	}
+	return c.memory[nodeName], total, nil
+}
+
+func (c fakeResourceClient) GetReservableCPUCores(_ context.Context, nodeName string, _ int64) (int, int, error) {
+	total := c.cpusTotal[nodeName]
+	if total == 0 {
+		total = c.cpus[nodeName]
+	}
+	return c.cpus[nodeName], total, nil
+}
+
+// errorResourceClient always returns the given error for the specified method.
+type errorResourceClient struct {
+	fakeResourceClient
+	memErr error
+	cpuErr error
+}
+
+func (c errorResourceClient) GetReservableMemoryBytes(ctx context.Context, nodeName string, adj int64) (uint64, uint64, error) {
+	if c.memErr != nil {
+		return 0, 0, c.memErr
+	}
+	return c.fakeResourceClient.GetReservableMemoryBytes(ctx, nodeName, adj)
+}
+
+func (c errorResourceClient) GetReservableCPUCores(ctx context.Context, nodeName string, adj int64) (int, int, error) {
+	if c.cpuErr != nil {
+		return 0, 0, c.cpuErr
+	}
+	return c.fakeResourceClient.GetReservableCPUCores(ctx, nodeName, adj)
 }
 
 func miBytes(in int32) uint64 {
@@ -73,9 +111,9 @@ func TestSelectNode(t *testing.T) {
 				},
 			}
 
-			client := fakeResourceClient(availableMem)
+			cl := fakeResourceClient{memory: availableMem}
 
-			node, err := selectNode(context.Background(), client, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
+			node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
 			require.NoError(t, err)
 			require.Equal(t, expectedNode, node)
 
@@ -93,9 +131,9 @@ func TestSelectNode(t *testing.T) {
 			},
 		}
 
-		client := fakeResourceClient(availableMem)
+		cl := fakeResourceClient{memory: availableMem}
 
-		node, err := selectNode(context.Background(), client, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
+		node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
 		require.ErrorAs(t, err, &InsufficientMemoryError{})
 		require.Empty(t, node)
 
@@ -136,9 +174,9 @@ func TestSelectNodeEvenlySpread(t *testing.T) {
 				},
 			}
 
-			client := fakeResourceClient(availableMem)
+			cl := fakeResourceClient{memory: availableMem}
 
-			node, err := selectNode(context.Background(), client, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
+			node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
 			require.NoError(t, err)
 			require.Equal(t, expectedNode, node)
 
@@ -156,9 +194,9 @@ func TestSelectNodeEvenlySpread(t *testing.T) {
 			},
 		}
 
-		client := fakeResourceClient(availableMem)
+		cl := fakeResourceClient{memory: availableMem}
 
-		node, err := selectNode(context.Background(), client, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
+		node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
 		require.ErrorAs(t, err, &InsufficientMemoryError{})
 		require.Empty(t, node)
 
@@ -241,13 +279,191 @@ func TestScheduleVM(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	fakeProxmoxClient.EXPECT().GetReservableMemoryBytes(context.Background(), "pve1", int64(100)).Return(miBytes(60), nil)
-	fakeProxmoxClient.EXPECT().GetReservableMemoryBytes(context.Background(), "pve2", int64(100)).Return(miBytes(20), nil)
-	fakeProxmoxClient.EXPECT().GetReservableMemoryBytes(context.Background(), "pve3", int64(100)).Return(miBytes(20), nil)
+	fakeProxmoxClient.EXPECT().GetReservableMemoryBytes(context.Background(), "pve1", int64(100)).Return(miBytes(60), miBytes(100), nil)
+	fakeProxmoxClient.EXPECT().GetReservableMemoryBytes(context.Background(), "pve2", int64(100)).Return(miBytes(20), miBytes(100), nil)
+	fakeProxmoxClient.EXPECT().GetReservableMemoryBytes(context.Background(), "pve3", int64(100)).Return(miBytes(20), miBytes(100), nil)
 
 	node, err := ScheduleVM(context.Background(), machineScope)
 	require.NoError(t, err)
 	require.Equal(t, "pve2", node)
+}
+
+func TestSelectNodeCPUDisabled(t *testing.T) {
+	// When cpuAdjustment=0 (default), the scheduler should use round-robin (legacy behavior).
+	allowedNodes := []string{"pve1", "pve2", "pve3"}
+	availableMem := map[string]uint64{
+		"pve1": miBytes(20),
+		"pve2": miBytes(30),
+		"pve3": miBytes(15),
+	}
+
+	proxmoxMachine := &infrav1.ProxmoxMachine{
+		Spec: infrav1.ProxmoxMachineSpec{
+			MemoryMiB:  ptr.To(int32(8)),
+			NumSockets: ptr.To(int32(2)),
+			NumCores:   ptr.To(int32(4)),
+		},
+	}
+
+	cl := fakeResourceClient{memory: availableMem}
+
+	hints := &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(0))}
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, hints)
+	require.NoError(t, err)
+	// Round-robin with no existing VMs picks the node with most memory.
+	require.Equal(t, "pve2", node)
+}
+
+func TestSelectNodeWithCPUAwareness(t *testing.T) {
+	// Heterogeneous cluster: pve1 has more CPU headroom, pve2 has less.
+	// With CPU-aware scheduling, VMs should prefer pve1.
+	allowedNodes := []string{"pve1", "pve2"}
+
+	proxmoxMachine := &infrav1.ProxmoxMachine{
+		Spec: infrav1.ProxmoxMachineSpec{
+			MemoryMiB:  ptr.To(int32(16)),
+			NumSockets: ptr.To(int32(1)),
+			NumCores:   ptr.To(int32(8)),
+		},
+	}
+
+	// pve1: 64 cores * 300% = 192 allocatable, 100 used => 92 available. sat_cpu_after = (100+8)/192 = 56.2%
+	// pve2: 32 cores * 300% = 96 allocatable, 20 used => 76 available. sat_cpu_after = (20+8)/96 = 29.2%
+	// Both have equal RAM. pve2 wins (lower saturation).
+	cl := fakeResourceClient{
+		memory:      map[string]uint64{"pve1": miBytes(400), "pve2": miBytes(400)},
+		memoryTotal: map[string]uint64{"pve1": miBytes(500), "pve2": miBytes(500)},
+		cpus:        map[string]int{"pve1": 92, "pve2": 76},
+		cpusTotal:   map[string]int{"pve1": 192, "pve2": 96},
+	}
+
+	hints := &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(300))}
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, hints)
+	require.NoError(t, err)
+	// pve2 has lower CPU saturation (29.2% vs 56.2%), so it wins.
+	require.Equal(t, "pve2", node)
+}
+
+func TestSelectNodeSaturationPrefersBalanced(t *testing.T) {
+	// pve1: lots of RAM left but tight on CPU
+	// pve2: moderate on both
+	// Saturation should pick pve2 (better balanced).
+	allowedNodes := []string{"pve1", "pve2"}
+
+	proxmoxMachine := &infrav1.ProxmoxMachine{
+		Spec: infrav1.ProxmoxMachineSpec{
+			MemoryMiB:  ptr.To(int32(8)),
+			NumSockets: ptr.To(int32(1)),
+			NumCores:   ptr.To(int32(4)),
+		},
+	}
+
+	// pve1: tons of RAM but almost out of CPU. cpu_sat_after = (96-5+4)/96 = 99%. Bottleneck = 99%.
+	// pve2: moderate RAM, plenty of CPU. cpu_sat_after = (96-40+4)/96 = 62.5%. Bottleneck = 62.5%.
+	cl := fakeResourceClient{
+		memory:      map[string]uint64{"pve1": miBytes(500), "pve2": miBytes(100)},
+		memoryTotal: map[string]uint64{"pve1": miBytes(600), "pve2": miBytes(200)},
+		cpus:        map[string]int{"pve1": 5, "pve2": 40},
+		cpusTotal:   map[string]int{"pve1": 96, "pve2": 96},
+	}
+
+	hints := &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(300))}
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, hints)
+	require.NoError(t, err)
+	require.Equal(t, "pve2", node)
+}
+
+func TestSelectNodeInsufficientCPU(t *testing.T) {
+	allowedNodes := []string{"pve1", "pve2"}
+
+	proxmoxMachine := &infrav1.ProxmoxMachine{
+		Spec: infrav1.ProxmoxMachineSpec{
+			MemoryMiB:  ptr.To(int32(8)),
+			NumSockets: ptr.To(int32(1)),
+			NumCores:   ptr.To(int32(8)),
+		},
+	}
+
+	cl := fakeResourceClient{
+		memory:      map[string]uint64{"pve1": miBytes(500), "pve2": miBytes(500)},
+		memoryTotal: map[string]uint64{"pve1": miBytes(500), "pve2": miBytes(500)},
+		cpus:        map[string]int{"pve1": 2, "pve2": 4},
+		cpusTotal:   map[string]int{"pve1": 16, "pve2": 16},
+	}
+
+	hints := &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))}
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, hints)
+	require.ErrorAs(t, err, &InsufficientCPUError{})
+	require.Empty(t, node)
+}
+
+func TestSelectNodeInsufficientMemoryWithCPU(t *testing.T) {
+	// Both resources enabled, but memory is the bottleneck.
+	allowedNodes := []string{"pve1"}
+
+	proxmoxMachine := &infrav1.ProxmoxMachine{
+		Spec: infrav1.ProxmoxMachineSpec{
+			MemoryMiB:  ptr.To(int32(100)),
+			NumSockets: ptr.To(int32(1)),
+			NumCores:   ptr.To(int32(2)),
+		},
+	}
+
+	cl := fakeResourceClient{
+		memory:      map[string]uint64{"pve1": miBytes(50)},
+		memoryTotal: map[string]uint64{"pve1": miBytes(500)},
+		cpus:        map[string]int{"pve1": 64},
+		cpusTotal:   map[string]int{"pve1": 64},
+	}
+
+	hints := &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))}
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, hints)
+	require.ErrorAs(t, err, &InsufficientMemoryError{})
+	require.Empty(t, node)
+}
+
+func TestSelectNodeMemoryQueryError(t *testing.T) {
+	proxmoxMachine := &infrav1.ProxmoxMachine{
+		Spec: infrav1.ProxmoxMachineSpec{
+			MemoryMiB: ptr.To(int32(8)),
+		},
+	}
+
+	cl := errorResourceClient{
+		fakeResourceClient: fakeResourceClient{
+			memory: map[string]uint64{"pve1": miBytes(100)},
+		},
+		memErr: fmt.Errorf("connection refused"),
+	}
+
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, []string{"pve1"}, &infrav1.SchedulerHints{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "connection refused")
+	require.Empty(t, node)
+}
+
+func TestSelectNodeCPUQueryError(t *testing.T) {
+	proxmoxMachine := &infrav1.ProxmoxMachine{
+		Spec: infrav1.ProxmoxMachineSpec{
+			MemoryMiB:  ptr.To(int32(8)),
+			NumSockets: ptr.To(int32(1)),
+			NumCores:   ptr.To(int32(4)),
+		},
+	}
+
+	cl := errorResourceClient{
+		fakeResourceClient: fakeResourceClient{
+			memory: map[string]uint64{"pve1": miBytes(100)},
+			cpus:   map[string]int{"pve1": 32},
+		},
+		cpuErr: fmt.Errorf("node unavailable"),
+	}
+
+	hints := &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))}
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, []string{"pve1"}, hints)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "node unavailable")
+	require.Empty(t, node)
 }
 
 func TestInsufficientMemoryError_Error(t *testing.T) {
@@ -257,6 +473,15 @@ func TestInsufficientMemoryError_Error(t *testing.T) {
 		requested: 20,
 	}
 	require.Equal(t, "cannot reserve 20B of memory on node pve1: 10B available memory left", err.Error())
+}
+
+func TestInsufficientCPUError_Error(t *testing.T) {
+	err := InsufficientCPUError{
+		node:      "pve1",
+		available: 2,
+		requested: 8,
+	}
+	require.Equal(t, "cannot reserve 8 CPU cores on node pve1: 2 available cores left", err.Error())
 }
 
 func setupClient() client.Client {

@@ -185,6 +185,16 @@ type SchedulerHints struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	MemoryAdjustment *int64 `json:"memoryAdjustment,omitempty"`
+
+	// cpuAdjustment allows to adjust a node's CPU capacity by a given percentage.
+	// For example, setting it to 300 allows to allocate 300% of a host's CPU cores for VMs (3:1 overcommit),
+	// and setting it to 100 limits CPU allocation to the physical core count (no overcommit).
+	// Setting it to 0 entirely disables scheduling CPU constraints (default).
+	// When enabled, the scheduler uses a saturation-based algorithm that balances both
+	// CPU and memory utilization across nodes, preventing CPU hotspots on heterogeneous clusters.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	CPUAdjustment *int64 `json:"cpuAdjustment,omitempty"`
 }
 
 // GetMemoryAdjustment returns the memory adjustment percentage to use within the scheduler.
@@ -196,6 +206,18 @@ func (sh *SchedulerHints) GetMemoryAdjustment() int64 {
 	}
 
 	return memoryAdjustment
+}
+
+// GetCPUAdjustment returns the CPU adjustment percentage to use within the scheduler.
+// Returns 0 by default, which disables CPU-aware scheduling (backward compatible).
+func (sh *SchedulerHints) GetCPUAdjustment() int64 {
+	cpuAdjustment := int64(0)
+
+	if sh != nil {
+		cpuAdjustment = ptr.Deref(sh.CPUAdjustment, 0)
+	}
+
+	return cpuAdjustment
 }
 
 // ProxmoxClusterStatus defines the observed state of a ProxmoxCluster.

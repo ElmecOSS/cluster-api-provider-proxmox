@@ -130,6 +130,11 @@ type SchedulerHints struct {
 	// By default 100% of a node's memory will be used for allocation.
 	// +optional
 	MemoryAdjustment *uint64 `json:"memoryAdjustment,omitempty"`
+
+	// CPUAdjustment allows to adjust a node's CPU capacity by a given percentage.
+	// Setting it to 0 entirely disables scheduling CPU constraints (default).
+	// +optional
+	CPUAdjustment *uint64 `json:"cpuAdjustment,omitempty"`
 }
 
 // GetMemoryAdjustment returns the memory adjustment percentage to use within the scheduler.
@@ -141,6 +146,17 @@ func (sh *SchedulerHints) GetMemoryAdjustment() uint64 {
 	}
 
 	return memoryAdjustment
+}
+
+// GetCPUAdjustment returns the CPU adjustment percentage to use within the scheduler.
+func (sh *SchedulerHints) GetCPUAdjustment() uint64 {
+	cpuAdjustment := uint64(0)
+
+	if sh != nil {
+		cpuAdjustment = ptr.Deref(sh.CPUAdjustment, 0)
+	}
+
+	return cpuAdjustment
 }
 
 // ProxmoxClusterStatus defines the observed state of a ProxmoxCluster.

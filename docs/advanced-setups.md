@@ -176,6 +176,31 @@ This behaviour can be configured in the `ProxmoxCluster` CR through the field `.
 
 For example, setting it to `0` (zero), entirely disables scheduling based on memory. Alternatively, if you set it to any value greater than `0`, the scheduler will treat your host as it would have `${value}%` of memory. In real numbers that would mean, if you have a host with 64GB of memory and set the number to `300`, the scheduler would allow you to provision guests with a total of 192GB memory and therefore overprovision the host. (Use with caution! It's strongly suggested to have memory ballooning configured everywhere.). Or, if you were to set it to `95` for example, it would treat your host as it would only have 60,8GB of memory, and leave the remaining 3,2GB for the host.
 
+#### CPU-aware scheduling
+
+On heterogeneous Proxmox clusters — where nodes have different CPU core counts — the default round-robin scheduler distributes VMs evenly by count, which can cause CPU overcommit on nodes with fewer cores.
+
+The field `.spec.schedulerHints.cpuAdjustment` enables CPU-aware scheduling. When set to a value greater than `0`, the scheduler switches from round-robin to a **saturation-based algorithm** that considers both CPU and memory when placing VMs. Each node is scored by its tightest resource (the one closest to exhaustion), and the VM is placed on the node with the most headroom.
+
+| `cpuAdjustment` | Behaviour |
+|---|---|
+| `0` (default) | CPU is ignored. Legacy round-robin scheduler with memory as the only constraint. |
+| `100` | No CPU overcommit. A 64-core host can allocate up to 64 vCPUs total. |
+| `300` | 3:1 CPU overcommit. A 64-core host can allocate up to 192 vCPUs total. |
+
+Example:
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha2
+kind: ProxmoxCluster
+spec:
+  schedulerHints:
+    memoryAdjustment: 100
+    cpuAdjustment: 300
+```
+
+When `cpuAdjustment` is enabled, the scheduler also enforces a **hard CPU constraint**: if no node has enough available CPU cores for the requested VM (computed from `numSockets × numCores` in the `ProxmoxMachine` spec), provisioning will fail with an `InsufficientCPUError` condition — similar to how `InsufficientMemoryError` works for RAM.
+
 ## Template lookup based on Proxmox tags
 
 Our provider is able to look up templates based on their attached tags, for `ProxmoxMachine` resources, that make use of a tag selector.
