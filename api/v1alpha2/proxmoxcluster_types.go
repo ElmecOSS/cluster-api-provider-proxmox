@@ -585,6 +585,23 @@ func (c *ProxmoxCluster) GetZoneNodes(zoneName string) []string {
 	return nil
 }
 
+// GetZoneDNSServers returns the DNS servers configured for a given zone.
+// Returns nil if the zone is not found or has no DNS servers configured.
+func (c *ProxmoxCluster) GetZoneDNSServers(zone Zone) []string {
+	zoneName := ptr.Deref(zone, "")
+	if zoneName == "" {
+		return nil
+	}
+
+	for _, zc := range c.Spec.ZoneConfigs {
+		if ptr.Deref(zc.Zone, "") == zoneName {
+			return zc.DNSServers
+		}
+	}
+
+	return nil
+}
+
 func init() {
 	objectTypes = append(objectTypes, &ProxmoxCluster{}, &ProxmoxClusterList{})
 }
