@@ -390,12 +390,12 @@ func (c *ProxmoxCluster) AddInClusterZoneRef(pool client.Object) {
 	}
 
 	index := slices.IndexFunc(c.Status.InClusterZoneRef, func(r InClusterZoneRef) bool {
-		return *r.Zone == zone
+		return ptr.Deref(r.Zone, "") == zone
 	})
 
 	if index < 0 {
 		c.Status.InClusterZoneRef = append(c.Status.InClusterZoneRef, InClusterZoneRef{Zone: &zone})
-		index = len(c.Status.InClusterZoneRef)
+		index = len(c.Status.InClusterZoneRef) - 1
 	}
 
 	poolRef := corev1.LocalObjectReference{Name: pool.GetName()}
