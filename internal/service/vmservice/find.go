@@ -122,6 +122,7 @@ func updateVMLocation(ctx context.Context, s *scope.MachineScope) error {
 	updated := s.InfraCluster.ProxmoxCluster.UpdateNodeLocation(
 		machineName,
 		vm.Node,
+		s.Zone(),
 		util.IsControlPlaneMachine(s.Machine),
 	)
 

@@ -478,10 +478,11 @@ func (c *ProxmoxCluster) RemoveNodeLocation(machineName string, isControlPlane b
 // If the node location does not exist, it will be added.
 //
 // The function returns true if the value was added or updated, otherwise false.
-func (c *ProxmoxCluster) UpdateNodeLocation(machineName, node string, isControlPlane bool) bool {
+func (c *ProxmoxCluster) UpdateNodeLocation(machineName, node string, zone Zone, isControlPlane bool) bool {
 	if !c.HasMachine(machineName, isControlPlane) {
 		loc := NodeLocation{
 			Node:    node,
+			Zone:    zone,
 			Machine: corev1.LocalObjectReference{Name: machineName},
 		}
 		c.AddNodeLocation(loc, isControlPlane)
@@ -495,12 +496,18 @@ func (c *ProxmoxCluster) UpdateNodeLocation(machineName, node string, isControlP
 
 	for i, loc := range locations {
 		if loc.Machine.Name == machineName {
+			updated := false
 			if loc.Node != node {
 				locations[i].Node = node
-				return true
+				updated = true
+			}
+			// repair a missing zone: earlier versions dropped it on update.
+			if loc.Zone == nil && zone != nil {
+				locations[i].Zone = zone
+				updated = true
 			}
 
-			return false
+			return updated
 		}
 	}
 

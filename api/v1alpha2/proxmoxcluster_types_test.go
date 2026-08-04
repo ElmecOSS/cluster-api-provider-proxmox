@@ -30,20 +30,24 @@ import (
 )
 
 func TestUpdateNodeLocation(t *testing.T) {
+	zone1 := "zone1"
+
 	cl := ProxmoxCluster{
 		Status: ProxmoxClusterStatus{},
 	}
 
-	res := cl.UpdateNodeLocation("new", "n1", false)
+	res := cl.UpdateNodeLocation("new", "n1", &zone1, false)
 	require.NotNil(t, cl.Status.NodeLocations)
 	require.Len(t, cl.Status.NodeLocations.Workers, 1)
 	require.True(t, res)
+	require.Equal(t, zone1, *cl.Status.NodeLocations.Workers[0].Zone)
 
 	locs := &NodeLocations{
 		Workers: []NodeLocation{
 			{
 				Machine: corev1.LocalObjectReference{Name: "m1"},
 				Node:    "n1",
+				Zone:    &zone1,
 			},
 			{
 				Machine: corev1.LocalObjectReference{Name: "m2"},
@@ -58,19 +62,25 @@ func TestUpdateNodeLocation(t *testing.T) {
 
 	cl.Status.NodeLocations = locs
 
-	res = cl.UpdateNodeLocation("m1", "n2", false)
+	res = cl.UpdateNodeLocation("m1", "n2", &zone1, false)
 	require.True(t, res)
 	require.Len(t, cl.Status.NodeLocations.Workers, 3)
 	require.Equal(t, cl.Status.NodeLocations.Workers[0].Node, "n2")
+	require.Equal(t, zone1, *cl.Status.NodeLocations.Workers[0].Zone)
 
-	res = cl.UpdateNodeLocation("m4", "n4", false)
+	res = cl.UpdateNodeLocation("m4", "n4", nil, false)
 	require.True(t, res)
 	require.Len(t, cl.Status.NodeLocations.Workers, 4)
 	require.Equal(t, cl.Status.NodeLocations.Workers[3].Node, "n4")
 
-	res = cl.UpdateNodeLocation("m2", "n2", false)
+	res = cl.UpdateNodeLocation("m2", "n2", nil, false)
 	require.False(t, res)
 	require.Len(t, cl.Status.NodeLocations.Workers, 4)
+
+	// a missing zone is repaired even when the node did not change.
+	res = cl.UpdateNodeLocation("m2", "n2", &zone1, false)
+	require.True(t, res)
+	require.Equal(t, zone1, *cl.Status.NodeLocations.Workers[1].Zone)
 }
 
 func defaultCluster() *ProxmoxCluster {
@@ -208,7 +218,7 @@ func TestRemoveNodeLocation(t *testing.T) {
 	require.Len(t, cl.Status.NodeLocations.Workers, 2)
 	require.Equal(t, cl.Status.NodeLocations.Workers[0].Node, "n2")
 
-	cl.UpdateNodeLocation("m4", "n4", true)
+	cl.UpdateNodeLocation("m4", "n4", nil, true)
 	require.Len(t, cl.Status.NodeLocations.ControlPlane, 1)
 
 	cl.RemoveNodeLocation("m4", true)
