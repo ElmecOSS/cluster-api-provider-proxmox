@@ -161,6 +161,28 @@ type ZoneConfigSpec struct {
 	// placed in this zone. Defaults to true when not set.
 	// +optional
 	ControlPlaneEligible *bool `json:"controlPlaneEligible,omitempty"`
+
+	// credentialsRef is a reference to a Secret that contains the Proxmox API
+	// credentials (keys: url, token, secret; optional: insecure, root_ca) for
+	// the Proxmox cluster backing this zone. When not set, the cluster-level
+	// credentials are used and behavior is identical to a single-endpoint
+	// setup. If no namespace is provided, the namespace of the ProxmoxCluster
+	// will be used.
+	// +optional
+	CredentialsRef *corev1.SecretReference `json:"credentialsRef,omitempty"`
+
+	// templateSource overrides the machine template source for machines
+	// placed in this zone. This is required in practice when the zone is
+	// backed by a different Proxmox cluster, because templates cannot be
+	// cloned across Proxmox clusters. When not set, the machine's own
+	// sourceNode/templateID/templateSelector are used. The override is total:
+	// zone and machine template sources are never merged.
+	//
+	// Completeness (templateSelector, or templateID with sourceNode) is
+	// enforced by the CEL rule on the TemplateSource type; stricter
+	// field-level XOR rules exceed the CEL cost budget inside a list item.
+	// +optional
+	TemplateSource *TemplateSource `json:"templateSource,omitempty,omitzero"`
 }
 
 // IPConfigSpec contains information about available IP config.

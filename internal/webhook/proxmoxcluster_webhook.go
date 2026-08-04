@@ -79,6 +79,10 @@ func (*ProxmoxCluster) ValidateCreate(_ context.Context, obj runtime.Object) (wa
 		return warnings, err
 	}
 
+	if err := validateZoneCredentials(cluster); err != nil {
+		return warnings, err
+	}
+
 	return warnings, nil
 }
 
@@ -88,7 +92,7 @@ func (*ProxmoxCluster) ValidateDelete(_ context.Context, _ runtime.Object) (admi
 }
 
 // ValidateUpdate implements the update validation function.
-func (*ProxmoxCluster) ValidateUpdate(_ context.Context, _ runtime.Object, newObj runtime.Object) (warnings admission.Warnings, err error) {
+func (*ProxmoxCluster) ValidateUpdate(_ context.Context, oldObj runtime.Object, newObj runtime.Object) (warnings admission.Warnings, err error) {
 	newCluster, ok := newObj.(*infrav1.ProxmoxCluster)
 	if !ok {
 		return warnings, apierrors.NewBadRequest(fmt.Sprintf("expected a ProxmoxCluster but got %T", newCluster))
@@ -99,7 +103,88 @@ func (*ProxmoxCluster) ValidateUpdate(_ context.Context, _ runtime.Object, newOb
 		return warnings, err
 	}
 
+	if err := validateZoneCredentials(newCluster); err != nil {
+		return warnings, err
+	}
+
+	if oldCluster, ok := oldObj.(*infrav1.ProxmoxCluster); ok {
+		if err := validateZoneRemoval(oldCluster, newCluster); err != nil {
+			return warnings, err
+		}
+	}
+
 	return warnings, nil
+}
+
+// validateZoneCredentials requires a non-empty secret name on every zone
+// credentialsRef.
+func validateZoneCredentials(cluster *infrav1.ProxmoxCluster) error {
+	for i, zc := range cluster.Spec.ZoneConfigs {
+		if zc.CredentialsRef != nil && zc.CredentialsRef.Name == "" {
+			return apierrors.NewInvalid(
+				cluster.GroupVersionKind().GroupKind(),
+				cluster.GetName(),
+				field.ErrorList{
+					field.Invalid(
+						field.NewPath("spec", "zoneConfig").Index(i).Child("credentialsRef", "name"),
+						zc.CredentialsRef.Name, "credentialsRef must name a secret"),
+				})
+		}
+	}
+
+	return nil
+}
+
+// validateZoneRemoval denies removing a zone (or its credentialsRef) while
+// machines recorded in status.nodeLocations still live in that zone. With
+// per-zone credentials gone, those machines could no longer be reached on
+// the right Proxmox endpoint — the deletion path would either wedge or, far
+// worse, act on a same-named VM of another Proxmox cluster.
+func validateZoneRemoval(oldCluster, newCluster *infrav1.ProxmoxCluster) error {
+	newZonesWithCreds := make(map[string]bool, len(newCluster.Spec.ZoneConfigs))
+	for _, zc := range newCluster.Spec.ZoneConfigs {
+		newZonesWithCreds[ptr.Deref(zc.Zone, "")] = zc.CredentialsRef != nil
+	}
+
+	for _, zc := range oldCluster.Spec.ZoneConfigs {
+		if zc.CredentialsRef == nil {
+			continue
+		}
+
+		zoneName := ptr.Deref(zc.Zone, "")
+		if hasCreds, exists := newZonesWithCreds[zoneName]; exists && hasCreds {
+			continue
+		}
+
+		if machine := firstMachineInZone(newCluster, zoneName); machine != "" {
+			return apierrors.NewInvalid(
+				newCluster.GroupVersionKind().GroupKind(),
+				newCluster.GetName(),
+				field.ErrorList{
+					field.Forbidden(
+						field.NewPath("spec", "zoneConfig"),
+						fmt.Sprintf("cannot remove zone %q or its credentialsRef: machine %q still placed in this zone (see status.nodeLocations); delete or move those machines first", zoneName, machine)),
+				})
+		}
+	}
+
+	return nil
+}
+
+func firstMachineInZone(cluster *infrav1.ProxmoxCluster, zoneName string) string {
+	if cluster.Status.NodeLocations == nil {
+		return ""
+	}
+
+	for _, locs := range [][]infrav1.NodeLocation{cluster.Status.NodeLocations.ControlPlane, cluster.Status.NodeLocations.Workers} {
+		for _, loc := range locs {
+			if ptr.Deref(loc.Zone, "") == zoneName {
+				return loc.Machine.Name
+			}
+		}
+	}
+
+	return ""
 }
 
 func validateControlPlaneEndpoint(spec *infrav1.ProxmoxClusterSpec, gk schema.GroupKind, name string) error {

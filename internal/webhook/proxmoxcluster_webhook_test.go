@@ -21,7 +21,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
@@ -104,6 +106,34 @@ var _ = Describe("Controller Test", func() {
 				Gateway:   "2001:db8::1",
 			}
 			g.Expect(k8sClient.Create(testEnv.GetContext(), &cluster)).To(MatchError(ContainSubstring("addresses may not contain the endpoint IP")))
+		})
+	})
+
+	Context("zone template source", func() {
+		It("should disallow a zone templateSource without template information", func() {
+			cluster := validProxmoxCluster("test-cluster-zone-template")
+			cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
+				Zone:           ptr.To("zone-a"),
+				DNSServers:     []string{"8.8.8.8"},
+				TemplateSource: &infrav1.TemplateSource{},
+			}}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &cluster)).To(MatchError(ContainSubstring("Must specify either templateID or templateSelector")))
+		})
+
+		It("should allow a zone with credentialsRef and a complete templateSource", func() {
+			cluster := validProxmoxCluster("succeed-test-cluster-zone-template")
+			cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
+				Zone:       ptr.To("zone-a"),
+				DNSServers: []string{"8.8.8.8"},
+				CredentialsRef: &corev1.SecretReference{
+					Name: "zone-a-credentials",
+				},
+				TemplateSource: &infrav1.TemplateSource{
+					SourceNode: ptr.To("pve1"),
+					TemplateID: ptr.To(int32(100)),
+				},
+			}}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &cluster)).To(Succeed())
 		})
 	})
 
