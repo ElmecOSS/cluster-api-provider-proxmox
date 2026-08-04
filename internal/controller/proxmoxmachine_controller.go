@@ -45,6 +45,7 @@ import (
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/internal/service/vmservice"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/kubernetes/ipam"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox"
+	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox/clientfactory"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/scope"
 )
 
@@ -54,6 +55,7 @@ type ProxmoxMachineReconciler struct {
 	Scheme        *runtime.Scheme
 	Recorder      record.EventRecorder
 	ProxmoxClient proxmox.Client
+	ClientFactory clientfactory.Factory
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -290,6 +292,7 @@ func (r *ProxmoxMachineReconciler) getInfraCluster(ctx context.Context, logger *
 		ProxmoxCluster: proxmoxCluster,
 		ControllerName: "proxmoxmachine",
 		ProxmoxClient:  r.ProxmoxClient,
+		ClientFactory:  r.ClientFactory,
 		IPAMHelper:     ipam.NewHelper(r.Client, proxmoxCluster),
 	})
 	if err != nil {

@@ -19,14 +19,8 @@ package scope
 
 import (
 	"context"
-	"crypto/tls"
-	"fmt"
-	"net/http"
-	"slices"
-	"strings"
 
 	"github.com/go-logr/logr"
-	"github.com/luthermonson/go-proxmox"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -38,10 +32,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
-	"github.com/ionos-cloud/cluster-api-provider-proxmox/internal/tlshelper"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/kubernetes/ipam"
 	capmox "github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox"
-	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox/goproxmox"
+	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox/clientfactory"
 )
 
 // ClusterScopeParams defines the input parameters used to create a new Scope.
@@ -51,6 +44,7 @@ type ClusterScopeParams struct {
 	Cluster        *clusterv1.Cluster
 	ProxmoxCluster *infrav1.ProxmoxCluster
 	ProxmoxClient  capmox.Client
+	ClientFactory  clientfactory.Factory
 	ControllerName string
 	IPAMHelper     *ipam.Helper
 }
@@ -65,6 +59,7 @@ type ClusterScope struct {
 	ProxmoxCluster *infrav1.ProxmoxCluster
 
 	ProxmoxClient  capmox.Client
+	clientFactory  clientfactory.Factory
 	controllerName string
 
 	IPAMHelper *ipam.Helper
@@ -90,6 +85,12 @@ func NewClusterScope(params ClusterScopeParams) (*ClusterScope, error) {
 		params.Logger = &logger
 	}
 
+	if params.ClientFactory == nil {
+		// Not shared with other scopes, so effectively uncached; production
+		// wiring passes the manager-wide factory instead.
+		params.ClientFactory = clientfactory.New()
+	}
+
 	clusterScope := &ClusterScope{
 		Logger:         params.Logger,
 		client:         params.Client,
@@ -97,6 +98,7 @@ func NewClusterScope(params ClusterScopeParams) (*ClusterScope, error) {
 		ProxmoxCluster: params.ProxmoxCluster,
 		controllerName: params.ControllerName,
 		ProxmoxClient:  params.ProxmoxClient,
+		clientFactory:  params.ClientFactory,
 		IPAMHelper:     params.IPAMHelper,
 	}
 
@@ -134,15 +136,25 @@ func NewClusterScope(params ClusterScopeParams) (*ClusterScope, error) {
 }
 
 func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (capmox.Client, error) {
-	// get the credentials secret
+	secret, err := s.getCredentialsSecret(ctx, s.ProxmoxCluster.Spec.CredentialsRef)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.clientFactory.GetOrCreate(ctx, *s.Logger, secret)
+}
+
+// getCredentialsSecret fetches a Proxmox credentials secret. When the
+// reference carries no namespace, the ProxmoxCluster namespace is used.
+func (s *ClusterScope) getCredentialsSecret(ctx context.Context, ref *corev1.SecretReference) (*corev1.Secret, error) {
 	secret := corev1.Secret{}
-	namespace := s.ProxmoxCluster.Spec.CredentialsRef.Namespace
+	namespace := ref.Namespace
 	if len(namespace) == 0 {
 		namespace = s.ProxmoxCluster.GetNamespace()
 	}
 	err := s.client.Get(ctx, client.ObjectKey{
 		Namespace: namespace,
-		Name:      s.ProxmoxCluster.Spec.CredentialsRef.Name,
+		Name:      ref.Name,
 	}, &secret)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -156,35 +168,7 @@ func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (capmox.Client, e
 		return nil, errors.Wrap(err, "failed to get credentials secret")
 	}
 
-	token := string(secret.Data["token"])
-	tokenSecret := string(secret.Data["secret"])
-	url := string(secret.Data["url"])
-
-	tlsInsecure, tlsInsecureSet := secret.Data["insecure"]
-	tlsRootCA := secret.Data["root_ca"]
-
-	rootCerts, err := tlshelper.SystemRootsWithCert(tlsRootCA)
-	if err != nil {
-		return nil, fmt.Errorf("loading cert pool: %w", err)
-	}
-
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			// When "insecure" is unset we retain the pre-v0.7 behavior of
-			// setting the connection insecure. If it is set we compare
-			// against YAML true-ish values.
-			//
-			// #nosec:G402 // Intended to enable insecure mode for unknown CAs
-			InsecureSkipVerify: !tlsInsecureSet || slices.Contains([]string{"1", "on", "true", "yes", "y"}, strings.ToLower(string(tlsInsecure))),
-			RootCAs:            rootCerts,
-		},
-	}
-
-	httpClient := &http.Client{Transport: tr}
-	return goproxmox.NewAPIClient(ctx, *s.Logger, url,
-		proxmox.WithHTTPClient(httpClient),
-		proxmox.WithAPIToken(token, tokenSecret),
-	)
+	return &secret, nil
 }
 
 // Name returns the CAPI cluster name.

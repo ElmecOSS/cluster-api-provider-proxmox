@@ -49,6 +49,7 @@ import (
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/consts"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/kubernetes/ipam"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox"
+	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox/clientfactory"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/scope"
 )
 
@@ -63,6 +64,7 @@ type ProxmoxClusterReconciler struct {
 	Scheme        *runtime.Scheme
 	Recorder      record.EventRecorder
 	ProxmoxClient proxmox.Client
+	ClientFactory clientfactory.Factory
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -132,6 +134,7 @@ func (r *ProxmoxClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		ProxmoxCluster: proxmoxCluster,
 		ControllerName: "proxmoxcluster",
 		ProxmoxClient:  r.ProxmoxClient,
+		ClientFactory:  r.ClientFactory,
 		IPAMHelper:     ipam.NewHelper(r.Client, proxmoxCluster.DeepCopy()),
 	})
 	if err != nil {
