@@ -362,10 +362,12 @@ without zones continue to work exactly as before.
 
 ### Limitations
 
-- Failure domains operate within a single Proxmox cluster (single API endpoint).
-  For multi-datacenter deployments spanning separate Proxmox clusters, see [#370](https://github.com/ionos-cloud/cluster-api-provider-proxmox/issues/370).
 - Zones without a `nodes` list appear as failure domains but do not restrict VM placement
   to specific Proxmox nodes. The IPAM pool selection still works per-zone.
+
+Zones can also be backed by separate Proxmox clusters (multi-datacenter,
+upstream issue [#370](https://github.com/ionos-cloud/cluster-api-provider-proxmox/issues/370)):
+see [multi-dc.md](multi-dc.md).
 
 ## Custom Allowed Nodes for ProxmoxMachine
 
