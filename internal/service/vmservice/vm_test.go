@@ -153,14 +153,16 @@ func TestEnsureVirtualMachine_CreateVM_FullOptions_TemplateSelector(t *testing.T
 	machineScope, proxmoxClient, _ := setupReconcilerTestWithCondition(t, infrav1.ProxmoxMachineVirtualMachineProvisionedCloningReason,
 		func(_ *clusterv1.Machine, _ *infrav1.ProxmoxCluster, infraMachine *infrav1.ProxmoxMachine) {
 			infraMachine.Spec.AllowedNodes = []string{"node1", "node2"}
+			// the template source is resolved once at scope construction,
+			// so it must be shaped here rather than on the returned scope.
+			infraMachine.Spec.VirtualMachineCloneSpec = infrav1.VirtualMachineCloneSpec{
+				TemplateSource: infrav1.TemplateSource{
+					TemplateSelector: &infrav1.TemplateSelector{
+						MatchTags: vmTemplateTags,
+					},
+				},
+			}
 		})
-	machineScope.ProxmoxMachine.Spec.VirtualMachineCloneSpec = infrav1.VirtualMachineCloneSpec{
-		TemplateSource: infrav1.TemplateSource{
-			TemplateSelector: &infrav1.TemplateSelector{
-				MatchTags: vmTemplateTags,
-			},
-		},
-	}
 
 	machineScope.ProxmoxMachine.Spec.Description = new("test vm")
 	machineScope.ProxmoxMachine.Spec.Format = ptr.To(infrav1.TargetStorageFormatRaw)
@@ -208,14 +210,16 @@ func TestEnsureVirtualMachine_CreateVM_FullOptions_TemplateSelector_VMTemplateNo
 	machineScope, proxmoxClient, _ := setupReconcilerTestWithCondition(t, infrav1.ProxmoxMachineVirtualMachineProvisionedCloningReason,
 		func(_ *clusterv1.Machine, _ *infrav1.ProxmoxCluster, infraMachine *infrav1.ProxmoxMachine) {
 			infraMachine.Spec.AllowedNodes = []string{"node2"}
+			// the template source is resolved once at scope construction,
+			// so it must be shaped here rather than on the returned scope.
+			infraMachine.Spec.VirtualMachineCloneSpec = infrav1.VirtualMachineCloneSpec{
+				TemplateSource: infrav1.TemplateSource{
+					TemplateSelector: &infrav1.TemplateSelector{
+						MatchTags: vmTemplateTags,
+					},
+				},
+			}
 		})
-	machineScope.ProxmoxMachine.Spec.VirtualMachineCloneSpec = infrav1.VirtualMachineCloneSpec{
-		TemplateSource: infrav1.TemplateSource{
-			TemplateSelector: &infrav1.TemplateSelector{
-				MatchTags: vmTemplateTags,
-			},
-		},
-	}
 	machineScope.ProxmoxMachine.Spec.Description = new("test vm")
 	machineScope.ProxmoxMachine.Spec.Format = ptr.To(infrav1.TargetStorageFormatRaw)
 	machineScope.ProxmoxMachine.Spec.Full = new(true)

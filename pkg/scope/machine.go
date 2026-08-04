@@ -83,6 +83,12 @@ type MachineScope struct {
 	// failureDomainErr; the controller gates on it before any Proxmox call.
 	proxmoxClient capmox.Client
 	clientErr     error
+
+	// templateSource is the effective template source, resolved once at
+	// scope construction: the zone's templateSource override when set,
+	// otherwise the machine's own template fields. Overrides are total,
+	// never merged.
+	templateSource infrav1.TemplateSource
 }
 
 // NewMachineScope creates a new MachineScope from the supplied parameters.
@@ -128,6 +134,7 @@ func NewMachineScope(params MachineScopeParams) (*MachineScope, error) {
 	}
 	m.failureDomainErr = m.resolvePlacement()
 	m.proxmoxClient, m.clientErr = m.InfraCluster.ClientForZone(context.TODO(), m.zone)
+	m.templateSource = m.resolveTemplateSource()
 	return m, nil
 }
 
@@ -214,6 +221,54 @@ func (m *MachineScope) ClientError() error {
 	return m.clientErr
 }
 
+// resolveTemplateSource resolves the effective template source once, at
+// scope construction: the machine zone's templateSource override wins over
+// the machine's own template fields. The override is total, never merged —
+// templates cannot be cloned across Proxmox clusters, so a zone backed by
+// its own Proxmox cluster must describe a complete source.
+func (m *MachineScope) resolveTemplateSource() infrav1.TemplateSource {
+	zoneName := ptr.Deref(m.zone, "")
+	if zoneName != "" {
+		for _, zc := range m.InfraCluster.ProxmoxCluster.Spec.ZoneConfigs {
+			if ptr.Deref(zc.Zone, "") == zoneName && zc.TemplateSource != nil {
+				return *zc.TemplateSource
+			}
+		}
+	}
+
+	return m.ProxmoxMachine.Spec.TemplateSource
+}
+
+// SourceNode returns the effective Proxmox node to clone this machine from.
+func (m *MachineScope) SourceNode() string {
+	return ptr.Deref(m.templateSource.SourceNode, "")
+}
+
+// TemplateID returns the effective template vmid, or -1 when unset.
+func (m *MachineScope) TemplateID() int32 {
+	if m.templateSource.TemplateID != nil {
+		return *m.templateSource.TemplateID
+	}
+	return -1
+}
+
+// TemplateSelectorTags returns the effective template selector tags.
+func (m *MachineScope) TemplateSelectorTags() []string {
+	if m.templateSource.TemplateSelector != nil {
+		return m.templateSource.TemplateSelector.MatchTags
+	}
+	return nil
+}
+
+// TemplateMatchPolicy returns the effective template match policy,
+// defaulting to exact matching.
+func (m *MachineScope) TemplateMatchPolicy() infrav1.TemplateMatchPolicy {
+	if m.templateSource.TemplateSelector != nil && m.templateSource.TemplateSelector.MatchPolicy != "" {
+		return m.templateSource.TemplateSelector.MatchPolicy
+	}
+	return infrav1.TemplateMatchPolicyExact
+}
+
 // Name returns the ProxmoxMachine name.
 func (m *MachineScope) Name() string {
 	return m.ProxmoxMachine.Name
@@ -245,7 +300,7 @@ func (m *MachineScope) LocateProxmoxNode() string {
 
 	node := m.InfraCluster.ProxmoxCluster.GetNode(m.Name(), util.IsControlPlaneMachine(m.Machine))
 	if node == "" {
-		node = m.ProxmoxMachine.GetSourceNode()
+		node = m.SourceNode()
 	}
 
 	return node

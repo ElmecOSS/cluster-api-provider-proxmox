@@ -27,6 +27,7 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 
 	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
+	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox"
 )
 
 // TestDeleteVM_RoutedToZoneClient is the anti-orphan proof: deleting a
@@ -76,6 +77,40 @@ func TestZoneClientError_FailClosed(t *testing.T) {
 	require.Error(t, machineScope.ClientError())
 	require.ErrorContains(t, machineScope.ClientError(), `zone "zone-gone" not configured`)
 	require.Nil(t, machineScope.ProxmoxClient())
+}
+
+// TestCreateVM_ZoneTemplateOverride proves the zone's templateSource wins
+// over the machine's own template fields and that the clone runs on the zone
+// client.
+func TestCreateVM_ZoneTemplateOverride(t *testing.T) {
+	ctx := context.Background()
+
+	machineScope, _, zoneClient, _ := setupZonedReconcilerTest(t, "zone-b",
+		func(_ *clusterv1.Machine, infraCluster *infrav1.ProxmoxCluster, _ *infrav1.ProxmoxMachine) {
+			infraCluster.Spec.ZoneConfigs[0].TemplateSource = &infrav1.TemplateSource{
+				SourceNode: ptr.To("dc-b-node"),
+				TemplateID: ptr.To(int32(999)),
+			}
+		})
+
+	// the machine's own fields (node1/123) must be ignored entirely.
+	require.Equal(t, "dc-b-node", machineScope.SourceNode())
+	require.EqualValues(t, 999, machineScope.TemplateID())
+
+	expectedOptions := proxmox.VMCloneRequest{
+		Node:   "dc-b-node",
+		Name:   "test",
+		Full:   true,
+		Target: "node1",
+	}
+
+	response := proxmox.VMCloneResponse{NewID: 456, Task: newTask()}
+	zoneClient.EXPECT().GetReservableMemoryBytes(ctx, "node1", int64(100)).Return(^uint64(0), nil).Once()
+	zoneClient.EXPECT().CloneVM(ctx, 999, expectedOptions).Return(response, nil).Once()
+
+	_, err := createVM(ctx, machineScope)
+	require.NoError(t, err)
+	require.Equal(t, "node1", *machineScope.ProxmoxMachine.Status.ProxmoxNode)
 }
 
 // TestZoneWithoutCredentials_UsesClusterClient: zones without their own

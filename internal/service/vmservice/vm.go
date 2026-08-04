@@ -448,7 +448,7 @@ func createVM(ctx context.Context, scope *scope.MachineScope) (proxmox.VMCloneRe
 	}
 
 	options := proxmox.VMCloneRequest{
-		Node:  scope.ProxmoxMachine.GetSourceNode(),
+		Node:  scope.SourceNode(),
 		NewID: int(vmid),
 		Name:  scope.ProxmoxMachine.GetName(),
 	}
@@ -490,11 +490,11 @@ func createVM(ctx context.Context, scope *scope.MachineScope) (proxmox.VMCloneRe
 		}
 	}
 
-	templateID := scope.ProxmoxMachine.GetTemplateID()
+	templateID := scope.TemplateID()
 	if templateID == -1 {
 		var err error
-		templateSelectorTags := scope.ProxmoxMachine.GetTemplateSelectorTags()
-		templateMatchPolicy := string(scope.ProxmoxMachine.GetTemplateMatchPolicy())
+		templateSelectorTags := scope.TemplateSelectorTags()
+		templateMatchPolicy := string(scope.TemplateMatchPolicy())
 		options.Node, templateID, err = scope.ProxmoxClient().FindVMTemplateByTags(ctx, templateSelectorTags, templateMatchPolicy)
 
 		if err != nil {
