@@ -47,7 +47,7 @@ func (err InsufficientMemoryError) Error() string {
 // ScheduleVM decides which node to a ProxmoxMachine should be scheduled on.
 // It requires the machine's ProxmoxCluster to have at least 1 allowed node.
 func ScheduleVM(ctx context.Context, machineScope *scope.MachineScope) (string, error) {
-	client := machineScope.InfraCluster.ProxmoxClient
+	client := machineScope.ProxmoxClient()
 	schedulerHints := machineScope.InfraCluster.ProxmoxCluster.Spec.SchedulerHints
 	locations := machineScope.InfraCluster.ProxmoxCluster.Status.NodeLocations.Workers
 	if util.IsControlPlaneMachine(machineScope.Machine) {

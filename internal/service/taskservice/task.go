@@ -55,7 +55,7 @@ func GetTask(ctx context.Context, machineScope *scope.MachineScope) (*proxmox.Ta
 		return nil, nil
 	}
 
-	task, err := machineScope.InfraCluster.ProxmoxClient.GetTask(ctx, *machineScope.ProxmoxMachine.Status.TaskRef)
+	task, err := machineScope.ProxmoxClient().GetTask(ctx, *machineScope.ProxmoxMachine.Status.TaskRef)
 	if err != nil {
 		return nil, ErrTaskNotFound
 	}

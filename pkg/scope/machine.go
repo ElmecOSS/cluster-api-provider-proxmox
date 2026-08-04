@@ -36,6 +36,7 @@ import (
 
 	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/kubernetes/ipam"
+	capmox "github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox"
 )
 
 // MachineScopeParams defines the input parameters used to create a new MachineScope.
@@ -190,6 +191,11 @@ func (m *MachineScope) Zone() *string {
 // must treat a non-nil result as "failure domain not ready".
 func (m *MachineScope) FailureDomainError() error {
 	return m.failureDomainErr
+}
+
+// ProxmoxClient returns the Proxmox API client to use for this machine.
+func (m *MachineScope) ProxmoxClient() capmox.Client {
+	return m.InfraCluster.ProxmoxClient
 }
 
 // Name returns the ProxmoxMachine name.
