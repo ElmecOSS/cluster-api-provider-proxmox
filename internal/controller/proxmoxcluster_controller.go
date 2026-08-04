@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -221,6 +222,8 @@ func (r *ProxmoxClusterReconciler) reconcileNormal(ctx context.Context, clusterS
 
 	r.reconcileFailureDomains(clusterScope)
 
+	r.reconcileZoneClients(ctx, clusterScope)
+
 	if err := r.reconcileNormalCredentialsSecret(ctx, clusterScope); err != nil {
 		reason := infrav1.ProxmoxClusterProxmoxAvailableProxmoxUnreachableReason
 		if apierrors.IsNotFound(err) {
@@ -316,6 +319,52 @@ func (r *ProxmoxClusterReconciler) reconcileFailureDomains(clusterScope *scope.C
 
 	sort.Slice(faildoms, func(i, j int) bool { return faildoms[i].Name < faildoms[j].Name })
 	pc.Status.FailureDomains = faildoms
+}
+
+// reconcileZoneClients probes the Proxmox endpoint of every zone that
+// carries its own credentialsRef and surfaces the result as the standalone
+// ZonesAvailable condition plus warning events. Thanks to the client factory
+// cache the steady-state probe is a map lookup. Failures never block
+// reconciliation: machines in healthy zones must keep reconciling, and the
+// machine controller already gates per-machine on the zone client.
+func (r *ProxmoxClusterReconciler) reconcileZoneClients(ctx context.Context, clusterScope *scope.ClusterScope) {
+	var probed, unreachable []string
+
+	for _, zc := range clusterScope.ProxmoxCluster.Spec.ZoneConfigs {
+		if zc.CredentialsRef == nil {
+			continue
+		}
+
+		zoneName := ptr.Deref(zc.Zone, "")
+		probed = append(probed, zoneName)
+
+		if _, err := clusterScope.ClientForZone(ctx, zc.Zone); err != nil {
+			unreachable = append(unreachable, zoneName)
+			r.Recorder.Eventf(clusterScope.ProxmoxCluster, corev1.EventTypeWarning, infrav1.ProxmoxClusterZonesAvailableZoneUnreachableReason,
+				"Proxmox endpoint for zone %q is unavailable: %v", zoneName, err)
+		}
+	}
+
+	if len(probed) == 0 {
+		conditions.Delete(clusterScope.ProxmoxCluster, infrav1.ProxmoxClusterZonesAvailableCondition)
+		return
+	}
+
+	if len(unreachable) > 0 {
+		conditions.Set(clusterScope.ProxmoxCluster, metav1.Condition{
+			Type:    infrav1.ProxmoxClusterZonesAvailableCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrav1.ProxmoxClusterZonesAvailableZoneUnreachableReason,
+			Message: fmt.Sprintf("Proxmox endpoint unavailable for zones: %s", strings.Join(unreachable, ", ")),
+		})
+		return
+	}
+
+	conditions.Set(clusterScope.ProxmoxCluster, metav1.Condition{
+		Type:   infrav1.ProxmoxClusterZonesAvailableCondition,
+		Status: metav1.ConditionTrue,
+		Reason: infrav1.ProxmoxClusterZonesAvailableReason,
+	})
 }
 
 func (r *ProxmoxClusterReconciler) reconcileNormalCredentialsSecret(ctx context.Context, clusterScope *scope.ClusterScope) error {

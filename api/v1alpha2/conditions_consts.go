@@ -43,6 +43,21 @@ const (
 
 	// ProxmoxClusterProxmoxAvailableDeletingReason documents a ProxmoxCluster being deleted.
 	ProxmoxClusterProxmoxAvailableDeletingReason = "Deleting"
+
+	// ProxmoxClusterZonesAvailableCondition documents the reachability of the
+	// per-zone Proxmox endpoints (zones with their own credentialsRef).
+	// Deliberately not part of the Ready summary: a single datacenter outage
+	// must not flip cluster readiness or block reconciliation of the
+	// remaining zones.
+	ProxmoxClusterZonesAvailableCondition = "ZonesAvailable"
+
+	// ProxmoxClusterZonesAvailableReason documents that every credentialed
+	// zone endpoint is reachable.
+	ProxmoxClusterZonesAvailableReason = "ZonesAvailable"
+
+	// ProxmoxClusterZonesAvailableZoneUnreachableReason documents at least one
+	// zone whose Proxmox endpoint client could not be resolved.
+	ProxmoxClusterZonesAvailableZoneUnreachableReason = "ZoneUnreachable"
 )
 
 // Conditions and Reasons for ProxmoxMachine.

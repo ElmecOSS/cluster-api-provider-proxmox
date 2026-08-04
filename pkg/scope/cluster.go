@@ -238,6 +238,7 @@ func (s *ClusterScope) PatchObject() error {
 		patch.WithOwnedConditions{Conditions: []string{
 			"Ready",
 			infrav1.ProxmoxClusterProxmoxAvailableCondition,
+			infrav1.ProxmoxClusterZonesAvailableCondition,
 		}})
 }
 
