@@ -105,6 +105,13 @@ const (
 	// the zone is added to spec.zoneConfig.
 	ProxmoxMachineVirtualMachineProvisionedFailureDomainNotReadyReason = "FailureDomainNotReady"
 
+	// ProxmoxMachineVirtualMachineProvisionedZoneClientUnavailableReason documents
+	// a ProxmoxMachine whose zone-specific Proxmox API client could not be
+	// resolved, e.g. because the zone credentials secret is missing or the
+	// endpoint is unreachable. The machine is never reconciled through
+	// another zone's client.
+	ProxmoxMachineVirtualMachineProvisionedZoneClientUnavailableReason = "ZoneClientUnavailable"
+
 	// ProxmoxMachineVirtualMachineProvisionedVMProvisionFailedReason documents a failure
 	// during virtual machine provisioning.
 	ProxmoxMachineVirtualMachineProvisionedVMProvisionFailedReason = "VMProvisionFailed"

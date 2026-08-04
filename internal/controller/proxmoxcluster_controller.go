@@ -320,96 +320,117 @@ func (r *ProxmoxClusterReconciler) reconcileFailureDomains(clusterScope *scope.C
 
 func (r *ProxmoxClusterReconciler) reconcileNormalCredentialsSecret(ctx context.Context, clusterScope *scope.ClusterScope) error {
 	proxmoxCluster := clusterScope.ProxmoxCluster
-	if !hasCredentialsRef(proxmoxCluster) {
-		return nil
+
+	for _, secretKey := range credentialsSecretKeys(proxmoxCluster) {
+		secret := &corev1.Secret{}
+		err := r.Client.Get(ctx, secretKey, secret)
+		if err != nil {
+			return err
+		}
+
+		helper, err := patch.NewHelper(secret, r.Client)
+		if err != nil {
+			return err
+		}
+
+		// Ensure the ProxmoxCluster is an owner and that the APIVersion is up-to-date.
+		secret.SetOwnerReferences(clusterutil.EnsureOwnerRef(secret.GetOwnerReferences(),
+			metav1.OwnerReference{
+				APIVersion: infrav1.GroupVersion.String(),
+				Kind:       "ProxmoxCluster",
+				Name:       proxmoxCluster.Name,
+				UID:        proxmoxCluster.UID,
+			},
+		))
+
+		// Ensure the finalizer is added.
+		if !ctrlutil.ContainsFinalizer(secret, infrav1.SecretFinalizer) {
+			ctrlutil.AddFinalizer(secret, infrav1.SecretFinalizer)
+		}
+
+		if err := helper.Patch(ctx, secret); err != nil {
+			return err
+		}
 	}
 
-	secret := &corev1.Secret{}
-	secretKey := client.ObjectKey{
-		Namespace: getNamespaceFromProxmoxCluster(proxmoxCluster),
-		Name:      proxmoxCluster.Spec.CredentialsRef.Name,
-	}
-	err := r.Client.Get(ctx, secretKey, secret)
-	if err != nil {
-		return err
-	}
-
-	helper, err := patch.NewHelper(secret, r.Client)
-	if err != nil {
-		return err
-	}
-
-	// Ensure the ProxmoxCluster is an owner and that the APIVersion is up-to-date.
-	secret.SetOwnerReferences(clusterutil.EnsureOwnerRef(secret.GetOwnerReferences(),
-		metav1.OwnerReference{
-			APIVersion: infrav1.GroupVersion.String(),
-			Kind:       "ProxmoxCluster",
-			Name:       proxmoxCluster.Name,
-			UID:        proxmoxCluster.UID,
-		},
-	))
-
-	// Ensure the finalizer is added.
-	if !ctrlutil.ContainsFinalizer(secret, infrav1.SecretFinalizer) {
-		ctrlutil.AddFinalizer(secret, infrav1.SecretFinalizer)
-	}
-
-	return helper.Patch(ctx, secret)
+	return nil
 }
 
 func (r *ProxmoxClusterReconciler) reconcileDeleteCredentialsSecret(ctx context.Context, clusterScope *scope.ClusterScope) error {
 	proxmoxCluster := clusterScope.ProxmoxCluster
-	if !hasCredentialsRef(proxmoxCluster) {
+	logger := ctrl.LoggerFrom(ctx)
+
+	for _, secretKey := range credentialsSecretKeys(proxmoxCluster) {
+		// Remove finalizer on Identity Secret
+		secret := &corev1.Secret{}
+		if err := r.Client.Get(ctx, secretKey, secret); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return err
+		}
+
+		helper, err := patch.NewHelper(secret, r.Client)
+		if err != nil {
+			return err
+		}
+
+		ownerRef := metav1.OwnerReference{
+			APIVersion: infrav1.GroupVersion.String(),
+			Kind:       "ProxmoxCluster",
+			Name:       proxmoxCluster.Name,
+			UID:        proxmoxCluster.UID,
+		}
+
+		if len(secret.GetOwnerReferences()) > 1 {
+			// Remove the ProxmoxCluster from the OwnerRef.
+			secret.SetOwnerReferences(clusterutil.RemoveOwnerRef(secret.GetOwnerReferences(), ownerRef))
+		} else if clusterutil.HasOwnerRef(secret.GetOwnerReferences(), ownerRef) && ctrlutil.ContainsFinalizer(secret, infrav1.SecretFinalizer) {
+			// There is only one OwnerRef, the current ProxmoxCluster. Remove the Finalizer (if present).
+			logger.Info(fmt.Sprintf("Removing finalizer %s", infrav1.SecretFinalizer), "Secret", klog.KObj(secret))
+			ctrlutil.RemoveFinalizer(secret, infrav1.SecretFinalizer)
+		}
+
+		if err := helper.Patch(ctx, secret); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// credentialsSecretKeys returns the deduplicated object keys of every
+// credentials secret referenced by the ProxmoxCluster: the cluster-level
+// credentialsRef plus all zone-level ones. References without a namespace
+// default to the ProxmoxCluster namespace.
+func credentialsSecretKeys(proxmoxCluster *infrav1.ProxmoxCluster) []client.ObjectKey {
+	if proxmoxCluster == nil {
 		return nil
 	}
 
-	logger := ctrl.LoggerFrom(ctx)
+	var keys []client.ObjectKey
+	seen := make(map[client.ObjectKey]struct{})
 
-	// Remove finalizer on Identity Secret
-	secret := &corev1.Secret{}
-	secretKey := client.ObjectKey{
-		Namespace: getNamespaceFromProxmoxCluster(proxmoxCluster),
-		Name:      proxmoxCluster.Spec.CredentialsRef.Name,
-	}
-	if err := r.Client.Get(ctx, secretKey, secret); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
+	add := func(ref *corev1.SecretReference) {
+		if ref == nil || ref.Name == "" {
+			return
 		}
-		return err
+		namespace := ref.Namespace
+		if len(namespace) == 0 {
+			namespace = proxmoxCluster.GetNamespace()
+		}
+		key := client.ObjectKey{Namespace: namespace, Name: ref.Name}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
 	}
 
-	helper, err := patch.NewHelper(secret, r.Client)
-	if err != nil {
-		return err
+	add(proxmoxCluster.Spec.CredentialsRef)
+	for _, zc := range proxmoxCluster.Spec.ZoneConfigs {
+		add(zc.CredentialsRef)
 	}
 
-	ownerRef := metav1.OwnerReference{
-		APIVersion: infrav1.GroupVersion.String(),
-		Kind:       "ProxmoxCluster",
-		Name:       proxmoxCluster.Name,
-		UID:        proxmoxCluster.UID,
-	}
-
-	if len(secret.GetOwnerReferences()) > 1 {
-		// Remove the ProxmoxCluster from the OwnerRef.
-		secret.SetOwnerReferences(clusterutil.RemoveOwnerRef(secret.GetOwnerReferences(), ownerRef))
-	} else if clusterutil.HasOwnerRef(secret.GetOwnerReferences(), ownerRef) && ctrlutil.ContainsFinalizer(secret, infrav1.SecretFinalizer) {
-		// There is only one OwnerRef, the current ProxmoxCluster. Remove the Finalizer (if present).
-		logger.Info(fmt.Sprintf("Removing finalizer %s", infrav1.SecretFinalizer), "Secret", klog.KObj(secret))
-		ctrlutil.RemoveFinalizer(secret, infrav1.SecretFinalizer)
-	}
-
-	return helper.Patch(ctx, secret)
-}
-
-func hasCredentialsRef(proxmoxCluster *infrav1.ProxmoxCluster) bool {
-	return proxmoxCluster != nil && proxmoxCluster.Spec.CredentialsRef != nil
-}
-
-func getNamespaceFromProxmoxCluster(proxmoxCluster *infrav1.ProxmoxCluster) string {
-	namespace := proxmoxCluster.Spec.CredentialsRef.Namespace
-	if len(namespace) == 0 {
-		namespace = proxmoxCluster.GetNamespace()
-	}
-	return namespace
+	return keys
 }

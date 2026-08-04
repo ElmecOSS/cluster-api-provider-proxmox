@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -138,10 +139,52 @@ func NewClusterScope(params ClusterScopeParams) (*ClusterScope, error) {
 func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (capmox.Client, error) {
 	secret, err := s.getCredentialsSecret(ctx, s.ProxmoxCluster.Spec.CredentialsRef)
 	if err != nil {
+		if apierrors.IsNotFound(errors.Cause(err)) {
+			conditions.Set(s.ProxmoxCluster, metav1.Condition{
+				Type:    infrav1.ProxmoxClusterProxmoxAvailableCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  infrav1.ProxmoxClusterProxmoxAvailableCredentialsNotFoundReason,
+				Message: "credentials secret not found",
+			})
+		}
 		return nil, err
 	}
 
 	return s.clientFactory.GetOrCreate(ctx, *s.Logger, secret)
+}
+
+// ClientForZone returns the Proxmox API client backing the given zone.
+//
+// A nil zone (the default zone) and zones without their own credentialsRef
+// resolve to the cluster-level client, which keeps single-endpoint setups
+// bit-identical to before. A zone that is not configured, or whose
+// credentials cannot be resolved, is an error: falling back to the cluster
+// client would route API calls — deletions included — to the wrong Proxmox
+// cluster.
+func (s *ClusterScope) ClientForZone(ctx context.Context, zone *string) (capmox.Client, error) {
+	zoneName := ptr.Deref(zone, "")
+	if zoneName == "" {
+		return s.ProxmoxClient, nil
+	}
+
+	for _, zc := range s.ProxmoxCluster.Spec.ZoneConfigs {
+		if ptr.Deref(zc.Zone, "") != zoneName {
+			continue
+		}
+
+		if zc.CredentialsRef == nil {
+			return s.ProxmoxClient, nil
+		}
+
+		secret, err := s.getCredentialsSecret(ctx, zc.CredentialsRef)
+		if err != nil {
+			return nil, errors.Wrapf(err, "resolving credentials for zone %q", zoneName)
+		}
+
+		return s.clientFactory.GetOrCreate(ctx, *s.Logger, secret)
+	}
+
+	return nil, errors.Errorf("zone %q not configured in ProxmoxCluster zones; refusing to fall back to the cluster client", zoneName)
 }
 
 // getCredentialsSecret fetches a Proxmox credentials secret. When the
@@ -157,14 +200,6 @@ func (s *ClusterScope) getCredentialsSecret(ctx context.Context, ref *corev1.Sec
 		Name:      ref.Name,
 	}, &secret)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			conditions.Set(s.ProxmoxCluster, metav1.Condition{
-				Type:    infrav1.ProxmoxClusterProxmoxAvailableCondition,
-				Status:  metav1.ConditionFalse,
-				Reason:  infrav1.ProxmoxClusterProxmoxAvailableCredentialsNotFoundReason,
-				Message: "credentials secret not found",
-			})
-		}
 		return nil, errors.Wrap(err, "failed to get credentials secret")
 	}
 

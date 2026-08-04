@@ -76,6 +76,13 @@ type MachineScope struct {
 	// construction so reconciliation paths that must proceed without the
 	// zone (e.g. deletion) still get a usable scope.
 	failureDomainErr error
+
+	// proxmoxClient is the zone-resolved API client for this machine,
+	// resolved once at scope construction. clientErr records the resolution
+	// failure instead of failing construction, for the same reason as
+	// failureDomainErr; the controller gates on it before any Proxmox call.
+	proxmoxClient capmox.Client
+	clientErr     error
 }
 
 // NewMachineScope creates a new MachineScope from the supplied parameters.
@@ -120,6 +127,7 @@ func NewMachineScope(params MachineScopeParams) (*MachineScope, error) {
 		IPAMHelper:     params.IPAMHelper,
 	}
 	m.failureDomainErr = m.resolvePlacement()
+	m.proxmoxClient, m.clientErr = m.InfraCluster.ClientForZone(context.TODO(), m.zone)
 	return m, nil
 }
 
@@ -193,9 +201,17 @@ func (m *MachineScope) FailureDomainError() error {
 	return m.failureDomainErr
 }
 
-// ProxmoxClient returns the Proxmox API client to use for this machine.
+// ProxmoxClient returns the Proxmox API client backing this machine's zone,
+// resolved once at scope construction. It is nil when ClientError is non-nil.
 func (m *MachineScope) ProxmoxClient() capmox.Client {
-	return m.InfraCluster.ProxmoxClient
+	return m.proxmoxClient
+}
+
+// ClientError returns the error encountered while resolving the machine's
+// zone client, or nil. Callers about to talk to Proxmox must treat a non-nil
+// result as "zone client unavailable" and never fall back to another client.
+func (m *MachineScope) ClientError() error {
+	return m.clientErr
 }
 
 // Name returns the ProxmoxMachine name.

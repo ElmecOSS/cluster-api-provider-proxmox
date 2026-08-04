@@ -169,6 +169,30 @@ func (r *ProxmoxMachineReconciler) reconcileDelete(ctx context.Context, machineS
 		Reason: clusterv1.DeletingReason,
 	})
 
+	// The VM was never created and no task is in flight: there is nothing to
+	// clean up on Proxmox. This also unblocks deleting machines whose zone
+	// was misconfigured before any provisioning happened.
+	if machineScope.GetVirtualMachineID() <= 0 && machineScope.ProxmoxMachine.Status.TaskRef == nil {
+		machineScope.InfraCluster.ProxmoxCluster.RemoveNodeLocation(machineScope.Name(), util.IsControlPlaneMachine(machineScope.Machine))
+		ctrlutil.RemoveFinalizer(machineScope.ProxmoxMachine, infrav1.MachineFinalizer)
+		return reconcile.Result{}, machineScope.InfraCluster.PatchObject()
+	}
+
+	// Never touch Proxmox through an unresolved zone client: querying the
+	// wrong endpoint can answer "VM does not exist" for a VM that is alive
+	// in another datacenter, dropping the finalizer and orphaning it — or
+	// worse, destroy an unrelated VM with the same VMID. Keep the finalizer
+	// and retry until the zone configuration is restored.
+	if err := machineScope.ClientError(); err != nil {
+		conditions.Set(machineScope.ProxmoxMachine, metav1.Condition{
+			Type:    infrav1.ProxmoxMachineVirtualMachineProvisionedCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrav1.ProxmoxMachineVirtualMachineProvisionedDeletionFailedReason,
+			Message: err.Error(),
+		})
+		return reconcile.Result{}, errors.Wrap(err, "zone client unavailable, refusing to delete through another endpoint")
+	}
+
 	err := vmservice.DeleteVM(ctx, machineScope)
 	if err != nil {
 		return reconcile.Result{}, err
@@ -224,6 +248,20 @@ func (r *ProxmoxMachineReconciler) reconcileNormal(ctx context.Context, machineS
 			Type:    infrav1.ProxmoxMachineVirtualMachineProvisionedCondition,
 			Status:  metav1.ConditionFalse,
 			Reason:  infrav1.ProxmoxMachineVirtualMachineProvisionedFailureDomainNotReadyReason,
+			Message: err.Error(),
+		})
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	// The zone client is resolved once at scope construction; do not
+	// provision while it is unavailable (missing zone secret, unreachable
+	// endpoint). The machine is never reconciled through another client.
+	if err := machineScope.ClientError(); err != nil {
+		machineScope.Logger.Error(err, "zone client unavailable", "zone", ptr.Deref(machineScope.Zone(), "default"))
+		conditions.Set(machineScope.ProxmoxMachine, metav1.Condition{
+			Type:    infrav1.ProxmoxMachineVirtualMachineProvisionedCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrav1.ProxmoxMachineVirtualMachineProvisionedZoneClientUnavailableReason,
 			Message: err.Error(),
 		})
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
