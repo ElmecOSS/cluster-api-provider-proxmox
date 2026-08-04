@@ -115,10 +115,11 @@ func (f *fakeClientFactory) GetOrCreate(_ context.Context, _ logr.Logger, secret
 }
 
 // setupZonedReconcilerTest initializes a MachineScope for a machine placed in
-// a zone backed by its own credentials secret. It returns both the cluster
-// mock client and the zone mock client, so tests can prove API calls are
-// routed to the zone endpoint.
-func setupZonedReconcilerTest(t *testing.T, zone string, mods ...testScopeMod) (*scope.MachineScope, *proxmoxtest.MockClient, *proxmoxtest.MockClient, client.Client) {
+// a zone backed by its own credentials secret. It returns the zone mock
+// client so tests can prove API calls are routed to the zone endpoint; the
+// cluster mock is created without expectations, so any call reaching it
+// fails the test.
+func setupZonedReconcilerTest(t *testing.T, zone string, mods ...testScopeMod) (*scope.MachineScope, *proxmoxtest.MockClient) {
 	factory := &fakeClientFactory{t: t, clients: map[string]*proxmoxtest.MockClient{}}
 
 	zoneMods := append([]testScopeMod{func(machine *clusterv1.Machine, infraCluster *infrav1.ProxmoxCluster, _ *infrav1.ProxmoxMachine) {
@@ -131,12 +132,12 @@ func setupZonedReconcilerTest(t *testing.T, zone string, mods ...testScopeMod) (
 		machine.Spec.FailureDomain = zone
 	}}, mods...)
 
-	machineScope, clusterMock, kubeClient := setupReconcilerTestWithFactory(t, factory, zoneMods...)
+	machineScope, _, _ := setupReconcilerTestWithFactory(t, factory, zoneMods...)
 
 	zoneMock := factory.clients[zoneCredentialsSecretName]
 	require.NotNil(t, zoneMock, "zone client was not resolved")
 
-	return machineScope, clusterMock, zoneMock, kubeClient
+	return machineScope, zoneMock
 }
 
 // setupReconcilerTest initializes a MachineScope with a mock Proxmox client and a fake controller-runtime client.

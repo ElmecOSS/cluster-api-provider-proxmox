@@ -344,7 +344,7 @@ func TestGetNetworkConfigDataForDevice_MissingIPAddress(t *testing.T) {
 }
 
 func TestGetNetworkConfigDataForDevice_ZoneDNS(t *testing.T) {
-	machineScope, _, _, _ := setupZonedReconcilerTest(t, "zone-b",
+	machineScope, _ := setupZonedReconcilerTest(t, "zone-b",
 		func(_ *clusterv1.Machine, infraCluster *infrav1.ProxmoxCluster, _ *infrav1.ProxmoxMachine) {
 			infraCluster.Spec.ZoneConfigs[0].DNSServers = []string{"9.9.9.9"}
 		})

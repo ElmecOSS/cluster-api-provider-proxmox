@@ -35,7 +35,7 @@ import (
 // never to the cluster one, where a same-VMID lookup could answer for an
 // unrelated VM.
 func TestDeleteVM_RoutedToZoneClient(t *testing.T) {
-	machineScope, _, zoneClient, _ := setupZonedReconcilerTest(t, "zone-b")
+	machineScope, zoneClient := setupZonedReconcilerTest(t, "zone-b")
 	require.NoError(t, machineScope.ClientError())
 
 	vm := newRunningVM()
@@ -54,7 +54,7 @@ func TestDeleteVM_RoutedToZoneClient(t *testing.T) {
 
 // TestFindVM_RoutedToZoneClient proves lookups run against the zone endpoint.
 func TestFindVM_RoutedToZoneClient(t *testing.T) {
-	machineScope, _, zoneClient, _ := setupZonedReconcilerTest(t, "zone-b")
+	machineScope, zoneClient := setupZonedReconcilerTest(t, "zone-b")
 
 	vm := newRunningVM()
 	machineScope.ProxmoxMachine.Spec.VirtualMachineID = new(int64(vm.VMID))
@@ -85,7 +85,7 @@ func TestZoneClientError_FailClosed(t *testing.T) {
 func TestCreateVM_ZoneTemplateOverride(t *testing.T) {
 	ctx := context.Background()
 
-	machineScope, _, zoneClient, _ := setupZonedReconcilerTest(t, "zone-b",
+	machineScope, zoneClient := setupZonedReconcilerTest(t, "zone-b",
 		func(_ *clusterv1.Machine, infraCluster *infrav1.ProxmoxCluster, _ *infrav1.ProxmoxMachine) {
 			infraCluster.Spec.ZoneConfigs[0].TemplateSource = &infrav1.TemplateSource{
 				SourceNode: ptr.To("dc-b-node"),
