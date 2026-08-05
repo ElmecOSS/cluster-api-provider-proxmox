@@ -172,6 +172,7 @@ We provide the following templates:
 | cilium loadbalancer | templates/cluster-template-cilium-load-balancer.yaml | templates/crs/cni/cilium.yaml, templates/crs/metallb.yaml |
 | external-creds      | templates/cluster-template-external-creds.yaml       |                                                           |
 | flatcar             | templates/cluster-template-flatcar.yaml              |                                                           |
+| multi-dc            | templates/cluster-template-multi-dc.yaml             | -                                                         |
 
 For more information about advanced clusters please check our [advanced setups docs](advanced-setups.md).
 

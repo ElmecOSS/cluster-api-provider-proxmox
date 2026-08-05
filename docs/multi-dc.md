@@ -84,7 +84,21 @@ The controller tracks the credentials secrets it manages via the
 ProxmoxCluster, so removing or re-pointing a zone `credentialsRef` also
 releases the finalizer and ownerRef from the previously referenced secret.
 
-Use `templates/cluster-template-multi-dc.yaml` as a starting point.
+Use `templates/cluster-template-multi-dc.yaml` as a starting point. On top
+of the standard template variables (`CONTROL_PLANE_ENDPOINT_IP`,
+`NODE_IP_RANGES`, `IP_PREFIX`, `GATEWAY`, `DNS_SERVERS`,
+`PROXMOX_URL/TOKEN/SECRET`, `PROXMOX_SOURCENODE`, `TEMPLATE_VMID`,
+`KUBERNETES_VERSION`, `VM_SSH_KEYS`, `BRIDGE`, `BOOT_VOLUME_DEVICE`, ...) it
+requires:
+
+| Variable | Purpose |
+|---|---|
+| `DC1_NODE_IP_RANGES` / `DC2_NODE_IP_RANGES` | per-zone IPAM pool addresses (required) |
+| `DC2_PROXMOX_URL` / `DC2_PROXMOX_TOKEN` / `DC2_PROXMOX_SECRET` | credentials of the Proxmox cluster backing zone 2 (required) |
+| `DC2_PROXMOX_SOURCENODE` / `DC2_TEMPLATE_VMID` | template source in the zone-2 Proxmox cluster (required) |
+| `DC1_ZONE` / `DC2_ZONE` | zone names (default `dc1`/`dc2`; never use the reserved name `default`) |
+| `DC1_ALLOWED_NODES` / `DC2_ALLOWED_NODES` | Proxmox nodes per zone (default `[]`) |
+| `WORKER_FAILURE_DOMAIN` | zone the worker MachineDeployment is pinned to (default: literal `dc1`) |
 
 ## Networking flavors
 
