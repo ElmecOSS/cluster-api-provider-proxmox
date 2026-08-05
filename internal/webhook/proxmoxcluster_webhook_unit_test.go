@@ -57,6 +57,12 @@ func TestValidateZoneCredentials(t *testing.T) {
 
 	err := validateZoneCredentials(clusterWithZone("zone-a", &corev1.SecretReference{}))
 	require.ErrorContains(t, err, "credentialsRef must name a secret")
+
+	// "default" is the implicit zone backed by the cluster-level config:
+	// an explicit zoneConfig would silently re-route machines already
+	// referencing it and collide with the cluster-level IPAM pools.
+	err = validateZoneCredentials(clusterWithZone("default", nil))
+	require.ErrorContains(t, err, "reserved name")
 }
 
 func TestValidateZoneRemoval_DeniesWithLiveMachines(t *testing.T) {
