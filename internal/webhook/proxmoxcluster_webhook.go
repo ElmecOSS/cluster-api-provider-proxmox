@@ -22,16 +22,19 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/pkg/errors"
 	"go4.org/netipx"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
@@ -111,7 +114,10 @@ func (*ProxmoxCluster) ValidateUpdate(_ context.Context, oldObj runtime.Object, 
 		if err := validateZoneRemoval(oldCluster, newCluster); err != nil {
 			return warnings, err
 		}
+		warnings = append(warnings, zoneChangeWarnings(oldCluster, newCluster)...)
 	}
+
+	warnings = append(warnings, zoneCredentialsWarnings(newCluster)...)
 
 	return warnings, nil
 }
@@ -135,24 +141,63 @@ func validateZoneCredentials(cluster *infrav1.ProxmoxCluster) error {
 	return nil
 }
 
-// validateZoneRemoval denies removing a zone (or its credentialsRef) while
-// machines recorded in status.nodeLocations still live in that zone. With
-// per-zone credentials gone, those machines could no longer be reached on
-// the right Proxmox endpoint — the deletion path would either wedge or, far
-// worse, act on a same-named VM of another Proxmox cluster.
+// zoneCredentialsWarnings warns about cross-namespace zone credentials:
+// the controller sets an ownerReference on the secret, and Kubernetes
+// garbage collection treats cross-namespace owners as absent, which can
+// lead to unexpected secret deletion.
+func zoneCredentialsWarnings(cluster *infrav1.ProxmoxCluster) admission.Warnings {
+	var warnings admission.Warnings
+	for i, zc := range cluster.Spec.ZoneConfigs {
+		if zc.CredentialsRef != nil && zc.CredentialsRef.Namespace != "" && zc.CredentialsRef.Namespace != cluster.GetNamespace() {
+			warnings = append(warnings, fmt.Sprintf(
+				"spec.zoneConfig[%d].credentialsRef points to namespace %q, different from the ProxmoxCluster namespace: the ownerReference set on the secret is cross-namespace, which Kubernetes GC may treat as an absent owner", i, zc.CredentialsRef.Namespace))
+		}
+	}
+	return warnings
+}
+
+// validateZoneRemoval denies removing a zone, or changing the identity of
+// its credentialsRef, while machines recorded in status.nodeLocations still
+// live in that zone. A removed zone wedges its machines (the zone client
+// resolves fail-closed, deletion included); a swapped credentialsRef is
+// worse — machine operations would be routed to a different Proxmox
+// endpoint, where a same-VMID lookup can adopt or destroy an unrelated VM.
 func validateZoneRemoval(oldCluster, newCluster *infrav1.ProxmoxCluster) error {
-	newZonesWithCreds := make(map[string]bool, len(newCluster.Spec.ZoneConfigs))
+	type zoneState struct {
+		exists bool
+		creds  client.ObjectKey
+		hasRef bool
+	}
+
+	credsKey := func(cluster *infrav1.ProxmoxCluster, ref *corev1.SecretReference) (client.ObjectKey, bool) {
+		if ref == nil {
+			return client.ObjectKey{}, false
+		}
+		namespace := ref.Namespace
+		if namespace == "" {
+			namespace = cluster.GetNamespace()
+		}
+		return client.ObjectKey{Namespace: namespace, Name: ref.Name}, true
+	}
+
+	newZones := make(map[string]zoneState, len(newCluster.Spec.ZoneConfigs))
 	for _, zc := range newCluster.Spec.ZoneConfigs {
-		newZonesWithCreds[ptr.Deref(zc.Zone, "")] = zc.CredentialsRef != nil
+		key, hasRef := credsKey(newCluster, zc.CredentialsRef)
+		newZones[ptr.Deref(zc.Zone, "")] = zoneState{exists: true, creds: key, hasRef: hasRef}
 	}
 
 	for _, zc := range oldCluster.Spec.ZoneConfigs {
-		if zc.CredentialsRef == nil {
-			continue
-		}
-
 		zoneName := ptr.Deref(zc.Zone, "")
-		if hasCreds, exists := newZonesWithCreds[zoneName]; exists && hasCreds {
+		oldKey, oldHasRef := credsKey(oldCluster, zc.CredentialsRef)
+
+		state := newZones[zoneName]
+		var reason string
+		switch {
+		case !state.exists:
+			reason = "cannot remove zone"
+		case oldHasRef != state.hasRef || (oldHasRef && oldKey != state.creds):
+			reason = "cannot change the credentialsRef of zone"
+		default:
 			continue
 		}
 
@@ -163,12 +208,55 @@ func validateZoneRemoval(oldCluster, newCluster *infrav1.ProxmoxCluster) error {
 				field.ErrorList{
 					field.Forbidden(
 						field.NewPath("spec", "zoneConfig"),
-						fmt.Sprintf("cannot remove zone %q or its credentialsRef: machine %q still placed in this zone (see status.nodeLocations); delete or move those machines first", zoneName, machine)),
+						fmt.Sprintf("%s %q: machine %q still placed in this zone (see status.nodeLocations); delete or move those machines first", reason, zoneName, machine)),
 				})
 		}
 	}
 
 	return nil
+}
+
+// zoneChangeWarnings returns admission warnings for risky-but-allowed zone
+// updates: guarded changes while legacy nodeLocations entries carry no zone
+// (they cannot be attributed to a zone, so the deny check is blind to them).
+func zoneChangeWarnings(oldCluster, newCluster *infrav1.ProxmoxCluster) admission.Warnings {
+	if newCluster.Status.NodeLocations == nil {
+		return nil
+	}
+
+	nilZoneMachines := 0
+	for _, locs := range [][]infrav1.NodeLocation{newCluster.Status.NodeLocations.ControlPlane, newCluster.Status.NodeLocations.Workers} {
+		for _, loc := range locs {
+			if loc.Zone == nil {
+				nilZoneMachines++
+			}
+		}
+	}
+	if nilZoneMachines == 0 {
+		return nil
+	}
+
+	oldZones := zoneConfigFingerprint(oldCluster)
+	newZones := zoneConfigFingerprint(newCluster)
+	if oldZones == newZones {
+		return nil
+	}
+
+	return admission.Warnings{fmt.Sprintf(
+		"%d machine(s) in status.nodeLocations have no recorded zone; the zone-removal safety check cannot attribute them to a zone — verify none of them lives in a zone you are removing or re-pointing", nilZoneMachines)}
+}
+
+func zoneConfigFingerprint(cluster *infrav1.ProxmoxCluster) string {
+	parts := make([]string, 0, len(cluster.Spec.ZoneConfigs))
+	for _, zc := range cluster.Spec.ZoneConfigs {
+		ref := ""
+		if zc.CredentialsRef != nil {
+			ref = zc.CredentialsRef.Namespace + "/" + zc.CredentialsRef.Name
+		}
+		parts = append(parts, ptr.Deref(zc.Zone, "")+"="+ref)
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
 }
 
 func firstMachineInZone(cluster *infrav1.ProxmoxCluster, zoneName string) string {

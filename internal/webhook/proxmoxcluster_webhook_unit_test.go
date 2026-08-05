@@ -77,6 +77,33 @@ func TestValidateZoneRemoval_DeniesWithLiveMachines(t *testing.T) {
 	placeMachineInZone(newCluster, "machine-2", "zone-a")
 
 	err = validateZoneRemoval(oldCluster, newCluster)
+	require.ErrorContains(t, err, `cannot change the credentialsRef of zone "zone-a"`)
+
+	// credentialsRef swapped to a different secret (= different endpoint).
+	newCluster = oldCluster.DeepCopy()
+	newCluster.Spec.ZoneConfigs[0].CredentialsRef = &corev1.SecretReference{Name: "creds-other"}
+	placeMachineInZone(newCluster, "machine-3", "zone-a")
+
+	err = validateZoneRemoval(oldCluster, newCluster)
+	require.ErrorContains(t, err, `cannot change the credentialsRef of zone "zone-a"`)
+
+	// credentialsRef added to a zone whose machines were created through
+	// the cluster client.
+	oldNoCreds := clusterWithZone("zone-a", nil)
+	newCluster = oldNoCreds.DeepCopy()
+	newCluster.Spec.ZoneConfigs[0].CredentialsRef = &corev1.SecretReference{Name: "creds-new"}
+	placeMachineInZone(newCluster, "machine-4", "zone-a")
+
+	err = validateZoneRemoval(oldNoCreds, newCluster)
+	require.ErrorContains(t, err, `cannot change the credentialsRef of zone "zone-a"`)
+
+	// removing a zone WITHOUT credentialsRef with live machines also wedges
+	// them (fail-closed client resolution): denied.
+	newCluster = oldNoCreds.DeepCopy()
+	newCluster.Spec.ZoneConfigs = nil
+	placeMachineInZone(newCluster, "machine-5", "zone-a")
+
+	err = validateZoneRemoval(oldNoCreds, newCluster)
 	require.ErrorContains(t, err, `cannot remove zone "zone-a"`)
 }
 
@@ -99,10 +126,50 @@ func TestValidateZoneRemoval_AllowsSafeChanges(t *testing.T) {
 	placeMachineInZone(newCluster, "machine-1", "zone-a")
 	require.NoError(t, validateZoneRemoval(oldCluster, newCluster))
 
-	// zones without credentialsRef are never blocked (single-endpoint case).
+	// changing unrelated zone fields (nodes, DNS) with machines is fine.
+	newCluster = oldCluster.DeepCopy()
+	newCluster.Spec.ZoneConfigs[0].Nodes = []string{"pve9"}
+	placeMachineInZone(newCluster, "machine-1", "zone-a")
+	require.NoError(t, validateZoneRemoval(oldCluster, newCluster))
+
+	// removing a credential-less zone without machines is fine.
 	oldNoCreds := clusterWithZone("zone-a", nil)
 	newCluster = oldNoCreds.DeepCopy()
 	newCluster.Spec.ZoneConfigs = nil
-	placeMachineInZone(newCluster, "machine-1", "zone-a")
 	require.NoError(t, validateZoneRemoval(oldNoCreds, newCluster))
+}
+
+func TestZoneChangeWarnings(t *testing.T) {
+	oldCluster := clusterWithZone("zone-a", &corev1.SecretReference{Name: "creds-a"})
+
+	// legacy nodeLocations without zone + a guarded zone change → warning.
+	newCluster := oldCluster.DeepCopy()
+	newCluster.Spec.ZoneConfigs = nil
+	newCluster.Status.NodeLocations = &infrav1.NodeLocations{
+		Workers: []infrav1.NodeLocation{{
+			Machine: corev1.LocalObjectReference{Name: "legacy"},
+			Node:    "pve1",
+		}},
+	}
+	warnings := zoneChangeWarnings(oldCluster, newCluster)
+	require.Len(t, warnings, 1)
+	require.Contains(t, warnings[0], "no recorded zone")
+
+	// no zone change → no warning even with legacy entries.
+	same := oldCluster.DeepCopy()
+	same.Status.NodeLocations = newCluster.Status.NodeLocations
+	require.Empty(t, zoneChangeWarnings(oldCluster, same))
+
+	// zone change but all locations carry a zone → no warning.
+	newCluster.Status.NodeLocations.Workers[0].Zone = ptr.To("zone-b")
+	require.Empty(t, zoneChangeWarnings(oldCluster, newCluster))
+}
+
+func TestZoneCredentialsWarnings(t *testing.T) {
+	cluster := clusterWithZone("zone-a", &corev1.SecretReference{Name: "creds", Namespace: "elsewhere"})
+	warnings := zoneCredentialsWarnings(cluster)
+	require.Len(t, warnings, 1)
+	require.Contains(t, warnings[0], "cross-namespace")
+
+	require.Empty(t, zoneCredentialsWarnings(clusterWithZone("zone-a", &corev1.SecretReference{Name: "creds"})))
 }
