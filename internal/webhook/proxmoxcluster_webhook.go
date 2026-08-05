@@ -123,9 +123,24 @@ func (*ProxmoxCluster) ValidateUpdate(_ context.Context, oldObj runtime.Object, 
 }
 
 // validateZoneCredentials requires a non-empty secret name on every zone
-// credentialsRef.
+// credentialsRef and reserves the implicit zone name "default": machines may
+// reference it without any zoneConfig entry (it maps to the cluster client
+// and the cluster-level IPAM pools), so a later explicit "default" zone
+// would silently re-route them and its pools would collide with the
+// cluster-level ones in status.inClusterZoneRef.
 func validateZoneCredentials(cluster *infrav1.ProxmoxCluster) error {
 	for i, zc := range cluster.Spec.ZoneConfigs {
+		if ptr.Deref(zc.Zone, "") == "default" {
+			return apierrors.NewInvalid(
+				cluster.GroupVersionKind().GroupKind(),
+				cluster.GetName(),
+				field.ErrorList{
+					field.Invalid(
+						field.NewPath("spec", "zoneConfig").Index(i).Child("zone"),
+						"default", `"default" is the reserved name of the implicit zone backed by the cluster-level configuration`),
+				})
+		}
+
 		if zc.CredentialsRef != nil && zc.CredentialsRef.Name == "" {
 			return apierrors.NewInvalid(
 				cluster.GroupVersionKind().GroupKind(),
@@ -251,7 +266,13 @@ func zoneConfigFingerprint(cluster *infrav1.ProxmoxCluster) string {
 	for _, zc := range cluster.Spec.ZoneConfigs {
 		ref := ""
 		if zc.CredentialsRef != nil {
-			ref = zc.CredentialsRef.Namespace + "/" + zc.CredentialsRef.Name
+			// default the namespace as validateZoneRemoval does, so making
+			// the cluster namespace explicit is not flagged as a change.
+			namespace := zc.CredentialsRef.Namespace
+			if namespace == "" {
+				namespace = cluster.GetNamespace()
+			}
+			ref = namespace + "/" + zc.CredentialsRef.Name
 		}
 		parts = append(parts, ptr.Deref(zc.Zone, "")+"="+ref)
 	}

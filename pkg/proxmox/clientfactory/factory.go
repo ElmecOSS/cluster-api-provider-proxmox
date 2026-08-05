@@ -58,6 +58,12 @@ func New() Factory {
 	return &cachingFactory{clients: map[types.NamespacedName]*entry{}}
 }
 
+// constructionErrorTTL is how long a failed construction is remembered:
+// within the window, GetOrCreate returns the cached error instead of
+// re-dialing, so a dead endpoint costs one dial per TTL instead of one per
+// machine reconcile.
+const constructionErrorTTL = 30 * time.Second
+
 // entry serializes construction per secret so that a slow or unreachable
 // endpoint never blocks lookups for other secrets: the factory-wide mutex is
 // only ever held for map access, while the network dial happens under the
@@ -76,6 +82,12 @@ type entry struct {
 	// transport backs client and is kept to release idle connections when
 	// the entry is replaced or evicted.
 	transport *http.Transport
+
+	// lastErr/lastErrAt implement a short-TTL negative cache for
+	// construction failures of the same secret data.
+	lastErr     error
+	lastErrHash [sha256.Size]byte
+	lastErrAt   time.Time
 }
 
 type cachingFactory struct {
@@ -102,11 +114,21 @@ func (f *cachingFactory) GetOrCreate(ctx context.Context, logger logr.Logger, se
 		return e.client, nil
 	}
 
-	// Construction errors are not cached; the next reconcile retries.
+	// Negative cache: a recent failure for the same data is returned as-is,
+	// so every machine of a dead zone does not pay its own dial timeout on
+	// each reconcile. Changed secret data bypasses it.
+	if e.lastErr != nil && e.lastErrHash == hash && time.Since(e.lastErrAt) < constructionErrorTTL {
+		return nil, e.lastErr
+	}
+
 	c, tr, err := newClientFromSecret(ctx, logger, secret)
 	if err != nil {
+		e.lastErr = err
+		e.lastErrHash = hash
+		e.lastErrAt = time.Now()
 		return nil, err
 	}
+	e.lastErr = nil
 
 	if e.transport != nil {
 		e.transport.CloseIdleConnections()
@@ -194,6 +216,7 @@ func newClientFromSecret(ctx context.Context, logger logr.Logger, secret *corev1
 		DialContext:           (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
 		TLSHandshakeTimeout:   5 * time.Second,
 		ResponseHeaderTimeout: 15 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
 	}
 
 	httpClient := &http.Client{Transport: tr}

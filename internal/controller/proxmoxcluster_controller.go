@@ -191,6 +191,23 @@ func (r *ProxmoxClusterReconciler) reconcileDelete(ctx context.Context, clusterS
 		return reconcile.Result{}, err
 	}
 
+	// Drop per-cluster factory and probe state so deleted clusters do not
+	// pin clients, transports or probe timestamps for the manager lifetime
+	// (and a re-created same-name cluster starts with a fresh probe).
+	proxmoxCluster := clusterScope.ProxmoxCluster
+	if r.ClientFactory != nil {
+		for _, key := range credentialsSecretKeys(proxmoxCluster) {
+			r.ClientFactory.Evict(key.Namespace, key.Name)
+		}
+	}
+	probePrefix := proxmoxCluster.Namespace + "/" + proxmoxCluster.Name + "/"
+	r.zoneProbeTimes.Range(func(key, _ any) bool {
+		if k, ok := key.(string); ok && strings.HasPrefix(k, probePrefix) {
+			r.zoneProbeTimes.Delete(key)
+		}
+		return true
+	})
+
 	clusterScope.Info("cluster deleted successfully")
 	ctrlutil.RemoveFinalizer(clusterScope.ProxmoxCluster, infrav1.ClusterFinalizer)
 	return ctrl.Result{}, nil
@@ -450,12 +467,15 @@ func (r *ProxmoxClusterReconciler) reconcileNormalCredentialsSecret(ctx context.
 			// The cluster-level secret keeps its historical semantics: its
 			// absence fails the cluster. Zone secret problems must never
 			// block the cluster (or the other zones); they already surface
-			// through the ZonesAvailable condition and its events.
+			// through the ZonesAvailable condition and its events. The key
+			// STAYS tracked: an earlier reconcile may have adopted the
+			// secret already, and releasing a never-adopted secret is a
+			// no-op — over-tracking is harmless, under-tracking orphans
+			// finalizers.
 			if hasClusterKey && secretKey == clusterKey {
 				setManagedSecretKeys(proxmoxCluster, currentSet)
 				return err
 			}
-			delete(currentSet, secretKey)
 			r.Recorder.Eventf(proxmoxCluster, corev1.EventTypeWarning, "CredentialsSecretAdoptionFailed",
 				"failed to adopt zone credentials secret %s: %v", secretKey, err)
 		}
@@ -505,15 +525,20 @@ func (r *ProxmoxClusterReconciler) adoptCredentialsSecret(ctx context.Context, p
 		return err
 	}
 
-	// Ensure the ProxmoxCluster is an owner and that the APIVersion is up-to-date.
-	secret.SetOwnerReferences(clusterutil.EnsureOwnerRef(secret.GetOwnerReferences(),
-		metav1.OwnerReference{
-			APIVersion: infrav1.GroupVersion.String(),
-			Kind:       "ProxmoxCluster",
-			Name:       proxmoxCluster.Name,
-			UID:        proxmoxCluster.UID,
-		},
-	))
+	// Ensure the ProxmoxCluster is an owner and that the APIVersion is
+	// up-to-date. Cross-namespace secrets get the finalizer only: Kubernetes
+	// GC treats a namespaced owner in another namespace as absent and would
+	// delete the secret.
+	if secret.GetNamespace() == proxmoxCluster.GetNamespace() {
+		secret.SetOwnerReferences(clusterutil.EnsureOwnerRef(secret.GetOwnerReferences(),
+			metav1.OwnerReference{
+				APIVersion: infrav1.GroupVersion.String(),
+				Kind:       "ProxmoxCluster",
+				Name:       proxmoxCluster.Name,
+				UID:        proxmoxCluster.UID,
+			},
+		))
+	}
 
 	// Ensure the finalizer is added.
 	if !ctrlutil.ContainsFinalizer(secret, infrav1.SecretFinalizer) {
@@ -548,12 +573,19 @@ func (r *ProxmoxClusterReconciler) releaseCredentialsSecret(ctx context.Context,
 		UID:        proxmoxCluster.UID,
 	}
 
-	if len(secret.GetOwnerReferences()) > 1 {
+	switch {
+	case len(secret.GetOwnerReferences()) > 1:
 		// Remove the ProxmoxCluster from the OwnerRef.
 		secret.SetOwnerReferences(clusterutil.RemoveOwnerRef(secret.GetOwnerReferences(), ownerRef))
-	} else if clusterutil.HasOwnerRef(secret.GetOwnerReferences(), ownerRef) && ctrlutil.ContainsFinalizer(secret, infrav1.SecretFinalizer) {
+	case clusterutil.HasOwnerRef(secret.GetOwnerReferences(), ownerRef) && ctrlutil.ContainsFinalizer(secret, infrav1.SecretFinalizer):
 		// There is only one OwnerRef, the current ProxmoxCluster. Remove the Finalizer (if present).
 		logger.Info(fmt.Sprintf("Removing finalizer %s", infrav1.SecretFinalizer), "Secret", klog.KObj(secret))
+		ctrlutil.RemoveFinalizer(secret, infrav1.SecretFinalizer)
+	case secret.GetNamespace() != proxmoxCluster.GetNamespace() && ctrlutil.ContainsFinalizer(secret, infrav1.SecretFinalizer):
+		// Cross-namespace secrets are adopted finalizer-only (no ownerRef,
+		// see adoptCredentialsSecret). Another cluster still using the
+		// secret re-adds the finalizer on its next reconcile.
+		logger.Info(fmt.Sprintf("Removing finalizer %s from cross-namespace secret", infrav1.SecretFinalizer), "Secret", klog.KObj(secret))
 		ctrlutil.RemoveFinalizer(secret, infrav1.SecretFinalizer)
 	}
 
