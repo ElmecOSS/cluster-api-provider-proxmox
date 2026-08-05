@@ -1312,6 +1312,7 @@ spec:
                                   - matchTags
                                   type: object
                               type: object
+                              x-kubernetes-map-type: atomic
                               x-kubernetes-validations:
                               - message: Must specify either templateID or templateSelector
                                 rule: has(self.templateSelector) || (has(self.templateID)

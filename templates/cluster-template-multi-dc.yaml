@@ -28,11 +28,14 @@ spec:
   controlPlaneEndpoint:
     host: ${CONTROL_PLANE_ENDPOINT_IP}
     port: 6443
-  # Stretched-VLAN flavor: one L2 segment spans both datacenters, so a
-  # single cluster-wide pool (and kube-vip in ARP mode) works as-is. For
-  # routed per-DC subnets, move ipv4Config/dnsServers into each zoneConfig
-  # entry, use per-zone bridges/VLANs on dedicated MachineDeployments, and
-  # replace kube-vip ARP with BGP mode or an external load balancer.
+  # The cluster-level pool serves only machines without a failure domain
+  # (the default zone). Every zone needs its own ipv4Config: machines placed
+  # in a zone draw their address from that zone's pool. Stretched-VLAN
+  # flavor: all pools are sub-ranges of the same L2 subnet and kube-vip in
+  # ARP mode works as-is. For routed per-DC subnets, give each zone its own
+  # subnet/gateway, use per-zone bridges/VLANs on dedicated
+  # MachineDeployments, and replace kube-vip ARP with BGP mode or an
+  # external load balancer.
   ipv4Config:
     addresses: ${NODE_IP_RANGES}
     prefix: ${IP_PREFIX}
@@ -48,12 +51,20 @@ spec:
     - zone: "${DC1_ZONE:=dc1}"
       dnsServers: ${DNS_SERVERS}
       nodes: ${DC1_ALLOWED_NODES:=[]}
+      ipv4Config:
+        addresses: ${DC1_NODE_IP_RANGES}
+        prefix: ${IP_PREFIX}
+        gateway: ${GATEWAY}
       templateSource:
         sourceNode: "${PROXMOX_SOURCENODE}"
         templateID: ${TEMPLATE_VMID}
     - zone: "${DC2_ZONE:=dc2}"
       dnsServers: ${DNS_SERVERS}
       nodes: ${DC2_ALLOWED_NODES:=[]}
+      ipv4Config:
+        addresses: ${DC2_NODE_IP_RANGES}
+        prefix: ${IP_PREFIX}
+        gateway: ${GATEWAY}
       credentialsRef:
         name: "${CLUSTER_NAME}-proxmox-credentials-dc2"
       templateSource:
@@ -263,7 +274,10 @@ spec:
       version: "${KUBERNETES_VERSION}"
       # Pin this MachineDeployment's workers to one zone; duplicate the
       # MachineDeployment (and, for routed networks, its machine template)
-      # per datacenter to spread workers across zones.
+      # per datacenter to spread workers across zones. NOTE: if you override
+      # DC1_ZONE, set WORKER_FAILURE_DOMAIN accordingly — the default is the
+      # literal "dc1" and a non-existent failure domain parks the workers as
+      # FailureDomainNotReady.
       failureDomain: "${WORKER_FAILURE_DOMAIN:=dc1}"
       bootstrap:
         configRef:

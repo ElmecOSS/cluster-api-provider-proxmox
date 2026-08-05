@@ -17,12 +17,20 @@ spec:
     - zone: dc1                      # backed by the cluster-level credentials
       dnsServers: [10.1.0.53]
       nodes: [dc1-pve1, dc1-pve2]
+      ipv4Config:                    # every zone needs its own pool: zoned
+        addresses: [10.1.0.100-10.1.0.120]   # machines draw from it
+        prefix: 24
+        gateway: 10.1.0.1
       templateSource:
         sourceNode: dc1-pve1
         templateID: 100
     - zone: dc2                      # backed by ANOTHER Proxmox cluster
       dnsServers: [10.2.0.53]
       nodes: [dc2-pve1, dc2-pve2]
+      ipv4Config:
+        addresses: [10.2.0.100-10.2.0.120]
+        prefix: 24
+        gateway: 10.2.0.1
       credentialsRef:                # secret keys: url, token, secret
         name: my-cluster-proxmox-credentials-dc2
       templateSource:                # templates cannot be cloned across
@@ -42,6 +50,13 @@ spec:
 - **`dnsServers`** — now actually honored: machines in the zone get the
   zone's resolvers, falling back to the cluster-level `dnsServers`.
 
+  > **Breaking change for existing multi-zone clusters** — this field was
+  > required but silently ignored before: machines always received the
+  > cluster-level `dnsServers`. From this release, machines created or
+  > rolled in a zone receive the **zone's** `dnsServers`. Review your
+  > `zoneConfig[].dnsServers` values (set them equal to the cluster-level
+  > list to keep the old behavior) before upgrading.
+
 Machines land in zones via the CAPI failure-domain contract: KubeadmControlPlane
 spreads replicas across `status.failureDomains` automatically;
 MachineDeployments pin workers with `spec.template.spec.failureDomain`.
@@ -56,7 +71,18 @@ finalizer and retries. The webhook refuses to remove a zone (or its
 
 Per-zone endpoint health is surfaced on the ProxmoxCluster as the standalone
 `ZonesAvailable` condition and warning events; it deliberately does not
-affect cluster readiness.
+affect cluster readiness. The endpoint of every credentialed zone is
+re-probed periodically (every ~5 minutes in steady state, ~2 minutes while a
+zone is down), so the condition both detects outages of already-established
+clients and recovers on its own. Zone clients are cached across reconciles
+and rebuilt on secret changes or probe failures; the **cluster-level**
+client is deliberately not cached, preserving upstream's
+construction-time liveness check for single-endpoint setups.
+
+The controller tracks the credentials secrets it manages via the
+`capmox.cluster.x-k8s.io/managed-credentials-secrets` annotation on the
+ProxmoxCluster, so removing or re-pointing a zone `credentialsRef` also
+releases the finalizer and ownerRef from the previously referenced secret.
 
 Use `templates/cluster-template-multi-dc.yaml` as a starting point.
 

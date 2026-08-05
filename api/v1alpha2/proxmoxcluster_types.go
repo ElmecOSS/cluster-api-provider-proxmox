@@ -182,6 +182,7 @@ type ZoneConfigSpec struct {
 	// enforced by the CEL rule on the TemplateSource type; stricter
 	// field-level XOR rules exceed the CEL cost budget inside a list item.
 	// +optional
+	// +structType=atomic
 	TemplateSource *TemplateSource `json:"templateSource,omitempty,omitzero"`
 }
 

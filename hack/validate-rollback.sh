@@ -59,10 +59,13 @@ while read -r cluster zone; do
   fi
 done <<< "${credentialed_zones}"
 
-# 2. no CAPI Machine may reference a credentialed zone as failureDomain.
+# 2. no CAPI Machine of the cluster may reference a credentialed zone as
+#    failureDomain (scoped by cluster-name label to avoid cross-cluster
+#    false positives in shared namespaces).
 while read -r cluster zone; do
   ns="${cluster%%/*}"
-  machines=$(kubectl get machines -n "${ns}" -o json | jq -r --arg zone "${zone}" '
+  name="${cluster##*/}"
+  machines=$(kubectl get machines -n "${ns}" -l "cluster.x-k8s.io/cluster-name=${name}" -o json | jq -r --arg zone "${zone}" '
     .items[] | select(.spec.failureDomain == $zone) | .metadata.name')
   if [[ -n "${machines}" ]]; then
     echo "FAIL: ${cluster}: CAPI Machines still reference failure domain \"${zone}\":"
@@ -70,6 +73,21 @@ while read -r cluster zone; do
     fail=1
   fi
 done <<< "${credentialed_zones}"
+
+# 3. legacy nodeLocations without a recorded zone cannot be attributed to a
+#    zone: flag them so the operator verifies manually.
+nilzone=$(echo "${clusters}" | jq -r '
+  .items[]
+  | . as $c
+  | select(([($c.spec.zoneConfig // [])[] | select(.credentialsRef != null)] | length) > 0)
+  | ((.status.nodeLocations.controlPlane // []) + (.status.nodeLocations.workers // []))[]
+  | select(.zone == null)
+  | "\($c.metadata.namespace)/\($c.metadata.name) \(.machine.name)"')
+if [[ -n "${nilzone}" ]]; then
+  echo "FAIL: machines with no recorded zone in status.nodeLocations (verify manually which endpoint hosts them):"
+  echo "${nilzone}" | sed 's/^/    /'
+  fail=1
+fi
 
 if [[ "${fail}" -ne 0 ]]; then
   cat >&2 <<'EOF'
