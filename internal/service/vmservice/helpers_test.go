@@ -114,6 +114,10 @@ func (f *fakeClientFactory) GetOrCreate(_ context.Context, _ logr.Logger, secret
 	return c, nil
 }
 
+func (f *fakeClientFactory) Evict(_, name string) {
+	delete(f.clients, name)
+}
+
 // setupZonedReconcilerTest initializes a MachineScope for a machine placed in
 // a zone backed by its own credentials secret. It returns the zone mock
 // client so tests can prove API calls are routed to the zone endpoint; the

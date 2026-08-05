@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/require"
@@ -112,6 +113,72 @@ func TestFactoryDoesNotCacheErrors(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, c)
 	require.EqualValues(t, 1, versionCalls.Load())
+}
+
+func TestFactoryDistinguishesAbsentFromEmptyKey(t *testing.T) {
+	srv, versionCalls := newVersionServer(t)
+	factory := New()
+	secret := newCredentialsSecret("creds", srv.URL)
+
+	first, err := factory.GetOrCreate(context.Background(), logr.Discard(), secret)
+	require.NoError(t, err)
+
+	// "insecure" absent and "insecure: \"\"" have different TLS semantics:
+	// the cache must rebuild.
+	secret.Data["insecure"] = []byte("")
+	second, err := factory.GetOrCreate(context.Background(), logr.Discard(), secret)
+	require.NoError(t, err)
+	require.NotSame(t, first, second)
+	require.EqualValues(t, 2, versionCalls.Load())
+}
+
+func TestFactoryEvict(t *testing.T) {
+	srv, versionCalls := newVersionServer(t)
+	factory := New()
+	secret := newCredentialsSecret("creds", srv.URL)
+
+	first, err := factory.GetOrCreate(context.Background(), logr.Discard(), secret)
+	require.NoError(t, err)
+
+	factory.Evict(secret.Namespace, secret.Name)
+
+	second, err := factory.GetOrCreate(context.Background(), logr.Discard(), secret)
+	require.NoError(t, err)
+	require.NotSame(t, first, second)
+	require.EqualValues(t, 2, versionCalls.Load())
+
+	// evicting an unknown secret is a no-op.
+	factory.Evict("nowhere", "nothing")
+}
+
+func TestFactorySlowEndpointDoesNotBlockOtherSecrets(t *testing.T) {
+	slowSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(2 * time.Second)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"release":"slow"}}`))
+	}))
+	t.Cleanup(slowSrv.Close)
+	fastSrv, _ := newVersionServer(t)
+
+	factory := New()
+
+	started := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		close(started)
+		_, _ = factory.GetOrCreate(context.Background(), logr.Discard(), newCredentialsSecret("slow-creds", slowSrv.URL))
+		close(done)
+	}()
+
+	<-started
+	time.Sleep(100 * time.Millisecond) // let the slow dial take its entry lock
+
+	start := time.Now()
+	_, err := factory.GetOrCreate(context.Background(), logr.Discard(), newCredentialsSecret("fast-creds", fastSrv.URL))
+	require.NoError(t, err)
+	require.Less(t, time.Since(start), time.Second, "a slow endpoint must not serialize other secrets")
+
+	<-done
 }
 
 func TestFactoryKeysBySecretIdentity(t *testing.T) {
