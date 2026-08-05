@@ -154,6 +154,10 @@ func (f *stubFactory) GetOrCreate(_ context.Context, _ logr.Logger, secret *core
 	return nil, errors.New("no stub client for secret " + secret.GetName())
 }
 
+func (f *stubFactory) Evict(_, name string) {
+	delete(f.clients, name)
+}
+
 func TestClientForZone(t *testing.T) {
 	k8sClient := getFakeClient(t)
 
@@ -222,6 +226,12 @@ func TestClientForZone(t *testing.T) {
 	// unconfigured zone → fail closed.
 	_, err = clusterScope.ClientForZone(ctx, ptr.To("zone-gone"))
 	require.ErrorContains(t, err, `zone "zone-gone" not configured`)
+
+	// the implicit "default" zone name always maps to the cluster client,
+	// even without a matching zoneConfig entry.
+	c, err = clusterScope.ClientForZone(ctx, ptr.To("default"))
+	require.NoError(t, err)
+	require.Same(t, clusterClient, c)
 }
 
 func TestListProxmoxMachinesForCluster(t *testing.T) {

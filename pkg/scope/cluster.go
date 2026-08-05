@@ -150,7 +150,11 @@ func (s *ClusterScope) setupProxmoxClient(ctx context.Context) (capmox.Client, e
 		return nil, err
 	}
 
-	return s.clientFactory.GetOrCreate(ctx, *s.Logger, secret)
+	// Deliberately uncached: upstream builds the cluster client (and its
+	// liveness-probing Version call) on every scope construction, and
+	// single-endpoint setups must keep that exact behavior. Only zone
+	// clients go through the caching factory.
+	return clientfactory.NewClientFromSecret(ctx, *s.Logger, secret)
 }
 
 // ClientForZone returns the Proxmox API client backing the given zone.
@@ -182,6 +186,15 @@ func (s *ClusterScope) ClientForZone(ctx context.Context, zone *string) (capmox.
 		}
 
 		return s.clientFactory.GetOrCreate(ctx, *s.Logger, secret)
+	}
+
+	// "default" is the implicit zone name used throughout the provider
+	// (IPAM pool labels, InClusterZoneRef, the machine zone label): a
+	// machine may legitimately reference it via spec.network.zone without
+	// any zoneConfig entry. It always maps to the cluster client. A
+	// zoneConfig entry literally named "default" is honored above.
+	if zoneName == "default" {
+		return s.ProxmoxClient, nil
 	}
 
 	return nil, errors.Errorf("zone %q not configured in ProxmoxCluster zones; refusing to fall back to the cluster client", zoneName)
