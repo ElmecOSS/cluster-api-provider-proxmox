@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -29,6 +30,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
@@ -66,6 +68,10 @@ type ProxmoxClusterReconciler struct {
 	Recorder      record.EventRecorder
 	ProxmoxClient proxmox.Client
 	ClientFactory clientfactory.Factory
+
+	// zoneProbeTimes rate-limits the per-zone endpoint liveness probe;
+	// keyed by "<namespace>/<cluster>/<zone>", values are time.Time.
+	zoneProbeTimes sync.Map
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -222,7 +228,7 @@ func (r *ProxmoxClusterReconciler) reconcileNormal(ctx context.Context, clusterS
 
 	r.reconcileFailureDomains(clusterScope)
 
-	r.reconcileZoneClients(ctx, clusterScope)
+	zoneRequeue := r.reconcileZoneClients(ctx, clusterScope)
 
 	if err := r.reconcileNormalCredentialsSecret(ctx, clusterScope); err != nil {
 		reason := infrav1.ProxmoxClusterProxmoxAvailableProxmoxUnreachableReason
@@ -246,7 +252,9 @@ func (r *ProxmoxClusterReconciler) reconcileNormal(ctx context.Context, clusterS
 
 	clusterScope.SetReady()
 
-	return ctrl.Result{}, nil
+	// re-run the zone endpoint probe periodically so ZonesAvailable both
+	// detects outages of cached clients and recovers.
+	return ctrl.Result{RequeueAfter: zoneRequeue}, nil
 }
 
 func (r *ProxmoxClusterReconciler) reconcileIPAM(ctx context.Context, clusterScope *scope.ClusterScope) (reconcile.Result, error) {
@@ -321,13 +329,26 @@ func (r *ProxmoxClusterReconciler) reconcileFailureDomains(clusterScope *scope.C
 	pc.Status.FailureDomains = faildoms
 }
 
-// reconcileZoneClients probes the Proxmox endpoint of every zone that
+// zoneProbeInterval rate-limits the live Version probe per zone endpoint,
+// and is the steady-state requeue interval of clusters with credentialed
+// zones. zoneUnreachableRequeue retries faster while a zone is down.
+const (
+	zoneProbeInterval      = 5 * time.Minute
+	zoneUnreachableRequeue = 2 * time.Minute
+)
+
+// reconcileZoneClients checks the Proxmox endpoint of every zone that
 // carries its own credentialsRef and surfaces the result as the standalone
-// ZonesAvailable condition plus warning events. Thanks to the client factory
-// cache the steady-state probe is a map lookup. Failures never block
-// reconciliation: machines in healthy zones must keep reconciling, and the
-// machine controller already gates per-machine on the zone client.
-func (r *ProxmoxClusterReconciler) reconcileZoneClients(ctx context.Context, clusterScope *scope.ClusterScope) {
+// ZonesAvailable condition plus warning events. Resolution goes through the
+// client factory cache; a rate-limited live Version probe catches endpoints
+// that died after the client was cached, and eviction makes the next
+// resolution rebuild from scratch. Failures never block reconciliation:
+// machines in healthy zones must keep reconciling, and the machine
+// controller already gates per-machine on the zone client.
+//
+// The returned duration is the requeue interval keeping the probe (and its
+// recovery) running; zero when the cluster has no credentialed zones.
+func (r *ProxmoxClusterReconciler) reconcileZoneClients(ctx context.Context, clusterScope *scope.ClusterScope) time.Duration {
 	var probed, unreachable []string
 
 	for _, zc := range clusterScope.ProxmoxCluster.Spec.ZoneConfigs {
@@ -338,16 +359,45 @@ func (r *ProxmoxClusterReconciler) reconcileZoneClients(ctx context.Context, clu
 		zoneName := ptr.Deref(zc.Zone, "")
 		probed = append(probed, zoneName)
 
-		if _, err := clusterScope.ClientForZone(ctx, zc.Zone); err != nil {
+		zoneClient, err := clusterScope.ClientForZone(ctx, zc.Zone)
+		if err != nil {
 			unreachable = append(unreachable, zoneName)
 			r.Recorder.Eventf(clusterScope.ProxmoxCluster, corev1.EventTypeWarning, infrav1.ProxmoxClusterZonesAvailableZoneUnreachableReason,
 				"Proxmox endpoint for zone %q is unavailable: %v", zoneName, err)
+			continue
 		}
+
+		// live probe, rate-limited per zone: the cached client was only
+		// verified reachable at construction time.
+		probeKey := clusterScope.ProxmoxCluster.Namespace + "/" + clusterScope.ProxmoxCluster.Name + "/" + zoneName
+		if last, ok := r.zoneProbeTimes.Load(probeKey); ok && time.Since(last.(time.Time)) < zoneProbeInterval {
+			continue
+		}
+
+		if _, err := zoneClient.Version(ctx); err != nil {
+			unreachable = append(unreachable, zoneName)
+			r.Recorder.Eventf(clusterScope.ProxmoxCluster, corev1.EventTypeWarning, infrav1.ProxmoxClusterZonesAvailableZoneUnreachableReason,
+				"Proxmox endpoint for zone %q failed the liveness probe: %v", zoneName, err)
+
+			// evict the cached client so the next resolution rebuilds it
+			// (and re-verifies the endpoint) from scratch.
+			namespace := zc.CredentialsRef.Namespace
+			if namespace == "" {
+				namespace = clusterScope.ProxmoxCluster.Namespace
+			}
+			if r.ClientFactory != nil {
+				r.ClientFactory.Evict(namespace, zc.CredentialsRef.Name)
+			}
+			r.zoneProbeTimes.Delete(probeKey)
+			continue
+		}
+
+		r.zoneProbeTimes.Store(probeKey, time.Now())
 	}
 
 	if len(probed) == 0 {
 		conditions.Delete(clusterScope.ProxmoxCluster, infrav1.ProxmoxClusterZonesAvailableCondition)
-		return
+		return 0
 	}
 
 	if len(unreachable) > 0 {
@@ -357,7 +407,7 @@ func (r *ProxmoxClusterReconciler) reconcileZoneClients(ctx context.Context, clu
 			Reason:  infrav1.ProxmoxClusterZonesAvailableZoneUnreachableReason,
 			Message: fmt.Sprintf("Proxmox endpoint unavailable for zones: %s", strings.Join(unreachable, ", ")),
 		})
-		return
+		return zoneUnreachableRequeue
 	}
 
 	conditions.Set(clusterScope.ProxmoxCluster, metav1.Condition{
@@ -365,87 +415,204 @@ func (r *ProxmoxClusterReconciler) reconcileZoneClients(ctx context.Context, clu
 		Status: metav1.ConditionTrue,
 		Reason: infrav1.ProxmoxClusterZonesAvailableReason,
 	})
+	return zoneProbeInterval
 }
 
 func (r *ProxmoxClusterReconciler) reconcileNormalCredentialsSecret(ctx context.Context, clusterScope *scope.ClusterScope) error {
 	proxmoxCluster := clusterScope.ProxmoxCluster
 
-	for _, secretKey := range credentialsSecretKeys(proxmoxCluster) {
-		secret := &corev1.Secret{}
-		err := r.Client.Get(ctx, secretKey, secret)
-		if err != nil {
-			return err
+	current := credentialsSecretKeys(proxmoxCluster)
+	currentSet := make(map[client.ObjectKey]struct{}, len(current))
+	for _, key := range current {
+		currentSet[key] = struct{}{}
+	}
+
+	// Release secrets we adopted earlier that are no longer referenced
+	// (a zone credentialsRef was removed or now names a different secret),
+	// so ownerRef and finalizer never outlive the reference. Keys we fail
+	// to release stay tracked and are retried next reconcile.
+	managed := managedSecretKeys(proxmoxCluster)
+	for _, key := range managed {
+		if _, stillReferenced := currentSet[key]; stillReferenced {
+			continue
 		}
-
-		helper, err := patch.NewHelper(secret, r.Client)
-		if err != nil {
-			return err
-		}
-
-		// Ensure the ProxmoxCluster is an owner and that the APIVersion is up-to-date.
-		secret.SetOwnerReferences(clusterutil.EnsureOwnerRef(secret.GetOwnerReferences(),
-			metav1.OwnerReference{
-				APIVersion: infrav1.GroupVersion.String(),
-				Kind:       "ProxmoxCluster",
-				Name:       proxmoxCluster.Name,
-				UID:        proxmoxCluster.UID,
-			},
-		))
-
-		// Ensure the finalizer is added.
-		if !ctrlutil.ContainsFinalizer(secret, infrav1.SecretFinalizer) {
-			ctrlutil.AddFinalizer(secret, infrav1.SecretFinalizer)
-		}
-
-		if err := helper.Patch(ctx, secret); err != nil {
-			return err
+		if err := r.releaseCredentialsSecret(ctx, proxmoxCluster, key); err != nil {
+			currentSet[key] = struct{}{} // keep tracking, retry later
+			r.Recorder.Eventf(proxmoxCluster, corev1.EventTypeWarning, "CredentialsSecretReleaseFailed",
+				"failed to release credentials secret %s: %v", key, err)
 		}
 	}
 
+	clusterKey, hasClusterKey := clusterCredentialsSecretKey(proxmoxCluster)
+
+	for _, secretKey := range current {
+		if err := r.adoptCredentialsSecret(ctx, proxmoxCluster, secretKey); err != nil {
+			// The cluster-level secret keeps its historical semantics: its
+			// absence fails the cluster. Zone secret problems must never
+			// block the cluster (or the other zones); they already surface
+			// through the ZonesAvailable condition and its events.
+			if hasClusterKey && secretKey == clusterKey {
+				setManagedSecretKeys(proxmoxCluster, currentSet)
+				return err
+			}
+			delete(currentSet, secretKey)
+			r.Recorder.Eventf(proxmoxCluster, corev1.EventTypeWarning, "CredentialsSecretAdoptionFailed",
+				"failed to adopt zone credentials secret %s: %v", secretKey, err)
+		}
+	}
+
+	setManagedSecretKeys(proxmoxCluster, currentSet)
 	return nil
 }
 
 func (r *ProxmoxClusterReconciler) reconcileDeleteCredentialsSecret(ctx context.Context, clusterScope *scope.ClusterScope) error {
 	proxmoxCluster := clusterScope.ProxmoxCluster
-	logger := ctrl.LoggerFrom(ctx)
 
-	for _, secretKey := range credentialsSecretKeys(proxmoxCluster) {
-		// Remove finalizer on Identity Secret
-		secret := &corev1.Secret{}
-		if err := r.Client.Get(ctx, secretKey, secret); err != nil {
-			if apierrors.IsNotFound(err) {
-				continue
-			}
-			return err
+	// Release everything: currently referenced secrets plus any stale
+	// tracked ones. Attempt all of them before reporting an error so one
+	// broken secret does not shield the others from cleanup.
+	keys := credentialsSecretKeys(proxmoxCluster)
+	seen := make(map[client.ObjectKey]struct{}, len(keys))
+	for _, key := range keys {
+		seen[key] = struct{}{}
+	}
+	for _, key := range managedSecretKeys(proxmoxCluster) {
+		if _, ok := seen[key]; !ok {
+			keys = append(keys, key)
 		}
+	}
 
-		helper, err := patch.NewHelper(secret, r.Client)
-		if err != nil {
-			return err
+	var errs []error
+	for _, secretKey := range keys {
+		if err := r.releaseCredentialsSecret(ctx, proxmoxCluster, secretKey); err != nil {
+			errs = append(errs, errors.Wrapf(err, "secret %s", secretKey))
 		}
+	}
 
-		ownerRef := metav1.OwnerReference{
+	return kerrors.NewAggregate(errs)
+}
+
+// adoptCredentialsSecret marks a credentials secret as used by this
+// ProxmoxCluster: ownerRef for garbage collection plus the SecretFinalizer.
+func (r *ProxmoxClusterReconciler) adoptCredentialsSecret(ctx context.Context, proxmoxCluster *infrav1.ProxmoxCluster, secretKey client.ObjectKey) error {
+	secret := &corev1.Secret{}
+	if err := r.Client.Get(ctx, secretKey, secret); err != nil {
+		return err
+	}
+
+	helper, err := patch.NewHelper(secret, r.Client)
+	if err != nil {
+		return err
+	}
+
+	// Ensure the ProxmoxCluster is an owner and that the APIVersion is up-to-date.
+	secret.SetOwnerReferences(clusterutil.EnsureOwnerRef(secret.GetOwnerReferences(),
+		metav1.OwnerReference{
 			APIVersion: infrav1.GroupVersion.String(),
 			Kind:       "ProxmoxCluster",
 			Name:       proxmoxCluster.Name,
 			UID:        proxmoxCluster.UID,
-		}
+		},
+	))
 
-		if len(secret.GetOwnerReferences()) > 1 {
-			// Remove the ProxmoxCluster from the OwnerRef.
-			secret.SetOwnerReferences(clusterutil.RemoveOwnerRef(secret.GetOwnerReferences(), ownerRef))
-		} else if clusterutil.HasOwnerRef(secret.GetOwnerReferences(), ownerRef) && ctrlutil.ContainsFinalizer(secret, infrav1.SecretFinalizer) {
-			// There is only one OwnerRef, the current ProxmoxCluster. Remove the Finalizer (if present).
-			logger.Info(fmt.Sprintf("Removing finalizer %s", infrav1.SecretFinalizer), "Secret", klog.KObj(secret))
-			ctrlutil.RemoveFinalizer(secret, infrav1.SecretFinalizer)
-		}
-
-		if err := helper.Patch(ctx, secret); err != nil {
-			return err
-		}
+	// Ensure the finalizer is added.
+	if !ctrlutil.ContainsFinalizer(secret, infrav1.SecretFinalizer) {
+		ctrlutil.AddFinalizer(secret, infrav1.SecretFinalizer)
 	}
 
-	return nil
+	return helper.Patch(ctx, secret)
+}
+
+// releaseCredentialsSecret undoes adoptCredentialsSecret, respecting other
+// ProxmoxCluster owners of a shared secret. A missing secret is fine.
+func (r *ProxmoxClusterReconciler) releaseCredentialsSecret(ctx context.Context, proxmoxCluster *infrav1.ProxmoxCluster, secretKey client.ObjectKey) error {
+	logger := ctrl.LoggerFrom(ctx)
+
+	secret := &corev1.Secret{}
+	if err := r.Client.Get(ctx, secretKey, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	helper, err := patch.NewHelper(secret, r.Client)
+	if err != nil {
+		return err
+	}
+
+	ownerRef := metav1.OwnerReference{
+		APIVersion: infrav1.GroupVersion.String(),
+		Kind:       "ProxmoxCluster",
+		Name:       proxmoxCluster.Name,
+		UID:        proxmoxCluster.UID,
+	}
+
+	if len(secret.GetOwnerReferences()) > 1 {
+		// Remove the ProxmoxCluster from the OwnerRef.
+		secret.SetOwnerReferences(clusterutil.RemoveOwnerRef(secret.GetOwnerReferences(), ownerRef))
+	} else if clusterutil.HasOwnerRef(secret.GetOwnerReferences(), ownerRef) && ctrlutil.ContainsFinalizer(secret, infrav1.SecretFinalizer) {
+		// There is only one OwnerRef, the current ProxmoxCluster. Remove the Finalizer (if present).
+		logger.Info(fmt.Sprintf("Removing finalizer %s", infrav1.SecretFinalizer), "Secret", klog.KObj(secret))
+		ctrlutil.RemoveFinalizer(secret, infrav1.SecretFinalizer)
+	}
+
+	return helper.Patch(ctx, secret)
+}
+
+// managedSecretKeys returns the credentials secrets this ProxmoxCluster
+// adopted, as tracked by the managed-credentials annotation.
+func managedSecretKeys(proxmoxCluster *infrav1.ProxmoxCluster) []client.ObjectKey {
+	value := proxmoxCluster.GetAnnotations()[infrav1.ManagedCredentialsSecretsAnnotation]
+	if value == "" {
+		return nil
+	}
+
+	var keys []client.ObjectKey
+	for _, item := range strings.Split(value, ",") {
+		namespace, name, found := strings.Cut(item, "/")
+		if !found || namespace == "" || name == "" {
+			continue
+		}
+		keys = append(keys, client.ObjectKey{Namespace: namespace, Name: name})
+	}
+
+	return keys
+}
+
+// setManagedSecretKeys records the adopted credentials secrets on the
+// managed-credentials annotation; the scope patch persists it.
+func setManagedSecretKeys(proxmoxCluster *infrav1.ProxmoxCluster, keys map[client.ObjectKey]struct{}) {
+	items := make([]string, 0, len(keys))
+	for key := range keys {
+		items = append(items, key.Namespace+"/"+key.Name)
+	}
+	sort.Strings(items)
+
+	annotations := proxmoxCluster.GetAnnotations()
+	if len(items) == 0 {
+		delete(annotations, infrav1.ManagedCredentialsSecretsAnnotation)
+		return
+	}
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[infrav1.ManagedCredentialsSecretsAnnotation] = strings.Join(items, ",")
+	proxmoxCluster.SetAnnotations(annotations)
+}
+
+// clusterCredentialsSecretKey returns the key of the cluster-level
+// credentials secret, if a credentialsRef is set.
+func clusterCredentialsSecretKey(proxmoxCluster *infrav1.ProxmoxCluster) (client.ObjectKey, bool) {
+	ref := proxmoxCluster.Spec.CredentialsRef
+	if ref == nil || ref.Name == "" {
+		return client.ObjectKey{}, false
+	}
+	namespace := ref.Namespace
+	if len(namespace) == 0 {
+		namespace = proxmoxCluster.GetNamespace()
+	}
+	return client.ObjectKey{Namespace: namespace, Name: ref.Name}, true
 }
 
 // credentialsSecretKeys returns the deduplicated object keys of every
