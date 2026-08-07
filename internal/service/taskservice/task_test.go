@@ -205,6 +205,29 @@ func TestReconcileInFlightTask_TaskSuccessful(t *testing.T) {
 	require.Nil(t, machineScope.ProxmoxMachine.Status.TaskRef)
 }
 
+// Proxmox reports "WARNINGS: n" for tasks that completed successfully but
+// logged warnings (e.g. LVM wiping a stale signature off a recycled logical
+// volume). go-proxmox flags those as failed; they must not stall the machine.
+func TestReconcileInFlightTask_TaskCompletedWithWarnings(t *testing.T) {
+	machineScope, mockClient := setupTaskTest(t)
+	machineScope.ProxmoxMachine.Status.TaskRef = new("UPID:node1:001")
+
+	task := &proxmox.Task{UPID: "UPID:node1:001", IsFailed: true, IsCompleted: true, Status: "stopped", ExitStatus: "WARNINGS: 1", Type: "qmclone"}
+	mockClient.EXPECT().GetTask(context.Background(), "UPID:node1:001").Return(task, nil).Once()
+
+	requeue, err := ReconcileInFlightTask(context.Background(), machineScope)
+	require.NoError(t, err)
+	require.False(t, requeue)
+	require.Nil(t, machineScope.ProxmoxMachine.Status.TaskRef)
+	require.Nil(t, machineScope.ProxmoxMachine.Status.RetryAfter)
+
+	cond := conditions.Get(machineScope.ProxmoxMachine, infrav1.ProxmoxMachineVirtualMachineProvisionedCondition)
+	if cond != nil {
+		require.NotEqual(t, infrav1.ProxmoxMachineVirtualMachineProvisionedTaskFailedReason, cond.Reason,
+			"a task completed with warnings must not be reported as failed")
+	}
+}
+
 // Test ReconcileInflightTask on task failure switch case if not qmstart.
 func TestReconcileInFlightTask_CloneTaskFailed(t *testing.T) {
 	machineScope, mockClient := setupTaskTest(t)

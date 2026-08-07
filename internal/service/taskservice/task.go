@@ -20,6 +20,7 @@ package taskservice
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/luthermonson/go-proxmox"
@@ -107,6 +108,15 @@ func checkAndRetryTask(scope *scope.MachineScope, task *proxmox.Task) (bool, err
 		logger.Info("task is a success", "description", task.Type)
 		scope.ProxmoxMachine.Status.TaskRef = nil
 		return false, nil
+	case task.IsCompleted && taskCompletedWithWarnings(task):
+		// Proxmox reports "WARNINGS: n" as the exit status of tasks that
+		// completed successfully but logged warnings, e.g. LVM wiping a
+		// stale signature off a recycled logical volume on shared storage.
+		// go-proxmox classifies any non-OK exit status as failed, which
+		// would stall the machine on a task that actually succeeded.
+		logger.Info("task succeeded with warnings", "description", task.Type, "exitStatus", task.ExitStatus)
+		scope.ProxmoxMachine.Status.TaskRef = nil
+		return false, nil
 	case task.IsFailed:
 		// Failing tasks are actually red herrings. Some tasks fail, other
 		// tasks can fail successfully (like qmstart).
@@ -148,4 +158,11 @@ func checkAndRetryTask(scope *scope.MachineScope, task *proxmox.Task) (bool, err
 	default:
 		return false, NewRequeueError(fmt.Sprintf("unknown task state %q for %q", task.ExitStatus, scope.ProxmoxMachine.Name), infrav1.DefaultReconcilerRequeue)
 	}
+}
+
+// taskCompletedWithWarnings reports whether a completed task exited with
+// Proxmox' "WARNINGS: n" status, which denotes success with logged warnings
+// rather than a failure.
+func taskCompletedWithWarnings(task *proxmox.Task) bool {
+	return strings.HasPrefix(task.ExitStatus, "WARNINGS:")
 }
