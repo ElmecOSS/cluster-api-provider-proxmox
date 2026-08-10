@@ -43,6 +43,21 @@ const (
 
 	// ProxmoxClusterProxmoxAvailableDeletingReason documents a ProxmoxCluster being deleted.
 	ProxmoxClusterProxmoxAvailableDeletingReason = "Deleting"
+
+	// ProxmoxClusterZonesAvailableCondition documents the reachability of the
+	// per-zone Proxmox endpoints (zones with their own credentialsRef).
+	// Deliberately not part of the Ready summary: a single datacenter outage
+	// must not flip cluster readiness or block reconciliation of the
+	// remaining zones.
+	ProxmoxClusterZonesAvailableCondition = "ZonesAvailable"
+
+	// ProxmoxClusterZonesAvailableReason documents that every credentialed
+	// zone endpoint is reachable.
+	ProxmoxClusterZonesAvailableReason = "ZonesAvailable"
+
+	// ProxmoxClusterZonesAvailableZoneUnreachableReason documents at least one
+	// zone whose Proxmox endpoint client could not be resolved.
+	ProxmoxClusterZonesAvailableZoneUnreachableReason = "ZoneUnreachable"
 )
 
 // Conditions and Reasons for ProxmoxMachine.
@@ -98,6 +113,19 @@ const (
 	// ProxmoxMachineVirtualMachineProvisionedWaitingForClusterAPIMachineAddressesReason
 	// documents a ProxmoxMachine assigning host addresses for Cluster API.
 	ProxmoxMachineVirtualMachineProvisionedWaitingForClusterAPIMachineAddressesReason = "WaitingForClusterAPIMachineAddresses"
+
+	// ProxmoxMachineVirtualMachineProvisionedFailureDomainNotReadyReason documents
+	// a ProxmoxMachine waiting for its failure domain (zone) to be configured
+	// in the ProxmoxCluster. This is a transient condition that resolves when
+	// the zone is added to spec.zoneConfig.
+	ProxmoxMachineVirtualMachineProvisionedFailureDomainNotReadyReason = "FailureDomainNotReady"
+
+	// ProxmoxMachineVirtualMachineProvisionedZoneClientUnavailableReason documents
+	// a ProxmoxMachine whose zone-specific Proxmox API client could not be
+	// resolved, e.g. because the zone credentials secret is missing or the
+	// endpoint is unreachable. The machine is never reconciled through
+	// another zone's client.
+	ProxmoxMachineVirtualMachineProvisionedZoneClientUnavailableReason = "ZoneClientUnavailable"
 
 	// ProxmoxMachineVirtualMachineProvisionedVMProvisionFailedReason documents a failure
 	// during virtual machine provisioning.

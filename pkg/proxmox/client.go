@@ -55,4 +55,8 @@ type Client interface {
 	CloudInitStatus(ctx context.Context, vm *proxmox.VirtualMachine) (bool, error)
 
 	QemuAgentStatus(ctx context.Context, vm *proxmox.VirtualMachine) error
+
+	// Version returns the Proxmox VE version of the endpoint; used as a
+	// cheap liveness probe.
+	Version(ctx context.Context) (*proxmox.Version, error)
 }

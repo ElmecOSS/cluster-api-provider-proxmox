@@ -48,6 +48,14 @@ const (
 	// ProxmoxGatewayMetricAnnotation is an annotation key used for denoting metric of a gateway.
 	ProxmoxGatewayMetricAnnotation string = "ipam.capmox.cluster.x-k8s.io/gateway-metric"
 
+	// ManagedCredentialsSecretsAnnotation tracks, on a ProxmoxCluster, the
+	// credentials secrets (comma-separated namespace/name) it adopted with
+	// ownerRef and finalizer, so that removing or changing a credentialsRef
+	// releases the previously referenced secret.
+	//
+	// #nosec G101 -- annotation key, not a credential
+	ManagedCredentialsSecretsAnnotation string = "capmox.cluster.x-k8s.io/managed-credentials-secrets"
+
 	// ProxmoxDefaultGatewayAnnotation marks an IPAddress spec as containing a default gateway.
 	ProxmoxDefaultGatewayAnnotation string = "ipam.capmox.cluster.x-k8s.io/default-gateway"
 )

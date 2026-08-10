@@ -48,6 +48,8 @@ import (
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/ignition"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/kubernetes/ipam"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/network"
+	capmox "github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox"
+	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox/clientfactory"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox/proxmoxtest"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/scope"
 )
@@ -73,8 +75,8 @@ func (f FakeIgnitionISOInjector) Inject(_ context.Context, _ inject.BootstrapDat
 }
 
 // setupReconcilerTestWithCondition sets up a reconciler test with a condition for the proxmoxmachiens statemachine.
-func setupReconcilerTestWithCondition(t *testing.T, condition string) (*scope.MachineScope, *proxmoxtest.MockClient, client.Client) {
-	machineScope, mockClient, client := setupReconcilerTest(t)
+func setupReconcilerTestWithCondition(t *testing.T, condition string, mods ...testScopeMod) (*scope.MachineScope, *proxmoxtest.MockClient, client.Client) {
+	machineScope, mockClient, client := setupReconcilerTest(t, mods...)
 
 	conditions.Set(machineScope.ProxmoxMachine, metav1.Condition{
 		Type:   infrav1.ProxmoxMachineVirtualMachineProvisionedCondition,
@@ -85,8 +87,69 @@ func setupReconcilerTestWithCondition(t *testing.T, condition string) (*scope.Ma
 	return machineScope, mockClient, client
 }
 
+// testScopeMod mutates the test fixture objects before the MachineScope is
+// built. Placement (allowed nodes, failure domain, zones) is resolved once at
+// scope construction, so tests must shape those specs here rather than on the
+// returned scope.
+type testScopeMod func(machine *clusterv1.Machine, infraCluster *infrav1.ProxmoxCluster, infraMachine *infrav1.ProxmoxMachine)
+
+// zoneCredentialsSecretName is the name of the zone credentials secret that
+// is always present in the fake client fixtures.
+const zoneCredentialsSecretName = "zone-credentials"
+
+// fakeClientFactory hands out one MockClient per credentials secret name,
+// so tests can assert that calls land on a zone's client and never on the
+// cluster one.
+type fakeClientFactory struct {
+	t       *testing.T
+	clients map[string]*proxmoxtest.MockClient
+}
+
+func (f *fakeClientFactory) GetOrCreate(_ context.Context, _ logr.Logger, secret *corev1.Secret) (capmox.Client, error) {
+	if c, ok := f.clients[secret.GetName()]; ok {
+		return c, nil
+	}
+	c := proxmoxtest.NewMockClient(f.t)
+	f.clients[secret.GetName()] = c
+	return c, nil
+}
+
+func (f *fakeClientFactory) Evict(_, name string) {
+	delete(f.clients, name)
+}
+
+// setupZonedReconcilerTest initializes a MachineScope for a machine placed in
+// a zone backed by its own credentials secret. It returns the zone mock
+// client so tests can prove API calls are routed to the zone endpoint; the
+// cluster mock is created without expectations, so any call reaching it
+// fails the test.
+func setupZonedReconcilerTest(t *testing.T, zone string, mods ...testScopeMod) (*scope.MachineScope, *proxmoxtest.MockClient) {
+	factory := &fakeClientFactory{t: t, clients: map[string]*proxmoxtest.MockClient{}}
+
+	zoneMods := append([]testScopeMod{func(machine *clusterv1.Machine, infraCluster *infrav1.ProxmoxCluster, _ *infrav1.ProxmoxMachine) {
+		infraCluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
+			Zone:           ptr.To(zone),
+			DNSServers:     []string{"1.2.3.4"},
+			Nodes:          []string{"node1"},
+			CredentialsRef: &corev1.SecretReference{Name: zoneCredentialsSecretName},
+		}}
+		machine.Spec.FailureDomain = zone
+	}}, mods...)
+
+	machineScope, _, _ := setupReconcilerTestWithFactory(t, factory, zoneMods...)
+
+	zoneMock := factory.clients[zoneCredentialsSecretName]
+	require.NotNil(t, zoneMock, "zone client was not resolved")
+
+	return machineScope, zoneMock
+}
+
 // setupReconcilerTest initializes a MachineScope with a mock Proxmox client and a fake controller-runtime client.
-func setupReconcilerTest(t *testing.T) (*scope.MachineScope, *proxmoxtest.MockClient, client.Client) {
+func setupReconcilerTest(t *testing.T, mods ...testScopeMod) (*scope.MachineScope, *proxmoxtest.MockClient, client.Client) {
+	return setupReconcilerTestWithFactory(t, nil, mods...)
+}
+
+func setupReconcilerTestWithFactory(t *testing.T, factory clientfactory.Factory, mods ...testScopeMod) (*scope.MachineScope, *proxmoxtest.MockClient, client.Client) {
 	cluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test",
@@ -166,15 +229,31 @@ func setupReconcilerTest(t *testing.T) (*scope.MachineScope, *proxmoxtest.MockCl
 		},
 	}
 
+	for _, mod := range mods {
+		mod(machine, infraCluster, infraMachine)
+	}
+
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 	require.NoError(t, clusterv1.AddToScheme(scheme))
 	require.NoError(t, ipamv1.AddToScheme(scheme))
 	require.NoError(t, ipamicv1.AddToScheme(scheme))
 	require.NoError(t, infrav1.AddToScheme(scheme))
+	zoneCredentials := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      zoneCredentialsSecretName,
+			Namespace: metav1.NamespaceDefault,
+		},
+		Data: map[string][]byte{
+			"url":    []byte("https://zone.pve.example:8006"),
+			"token":  []byte("user@pve!token"),
+			"secret": []byte("secret"),
+		},
+	}
+
 	kubeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(cluster, machine, infraCluster, infraMachine).
+		WithObjects(cluster, machine, infraCluster, infraMachine, zoneCredentials).
 		WithStatusSubresource(&infrav1.ProxmoxCluster{}, &infrav1.ProxmoxMachine{}).
 		Build()
 
@@ -218,6 +297,7 @@ func setupReconcilerTest(t *testing.T) (*scope.MachineScope, *proxmoxtest.MockCl
 		Cluster:        cluster,
 		ProxmoxCluster: infraCluster,
 		ProxmoxClient:  mockClient,
+		ClientFactory:  factory,
 		IPAMHelper:     ipamHelper,
 	})
 	require.NoError(t, err)
@@ -334,7 +414,7 @@ func createNetworkSpecForMachine(t *testing.T, c client.Client, machineScope *sc
 	// Can't hurt to create ippools here
 	createIPPools(t, c, machineScope)
 
-	defaultPools, _ := machineScope.IPAMHelper.GetInClusterPools(context.Background(), machineScope.ProxmoxMachine)
+	defaultPools, _ := machineScope.IPAMHelper.GetInClusterPools(context.Background(), machineScope.ProxmoxMachine, machineScope.Zone())
 	i := 0 // counter for ipPrefix variadic argument
 	// Create the pools sequentially by ref
 	for _, device := range ptr.Deref(machineScope.ProxmoxMachine.Spec.Network, infrav1.NetworkSpec{}).NetworkDevices {
@@ -429,7 +509,7 @@ func isDefaultPool(machineScope *scope.MachineScope, pool corev1.TypedLocalObjec
 func getDefaultPoolRefs(machineScope *scope.MachineScope) infrav1.InClusterZoneRef {
 	cluster := machineScope.InfraCluster.ProxmoxCluster
 
-	zone := ptr.Deref(machineScope.ProxmoxMachine.Spec.Network.Zone, "default")
+	zone := ptr.Deref(machineScope.Zone(), "default")
 	zoneIndex := slices.IndexFunc(cluster.Status.InClusterZoneRef, func(z infrav1.InClusterZoneRef) bool {
 		return zone == *z.Zone
 	})

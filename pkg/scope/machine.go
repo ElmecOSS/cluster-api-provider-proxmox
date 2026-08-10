@@ -36,6 +36,7 @@ import (
 
 	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/kubernetes/ipam"
+	capmox "github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox"
 )
 
 // MachineScopeParams defines the input parameters used to create a new MachineScope.
@@ -61,6 +62,33 @@ type MachineScope struct {
 	ProxmoxMachine *infrav1.ProxmoxMachine
 	IPAMHelper     *ipam.Helper
 	VirtualMachine *proxmox.VirtualMachine
+
+	// allowedNodes is the placement node list resolved once by
+	// resolvePlacement. Immutable after scope construction.
+	allowedNodes []string
+
+	// zone is the zone resolved once by resolvePlacement. Immutable after
+	// scope construction. nil means the default zone.
+	zone *string
+
+	// failureDomainErr records the FailureDomainNotFoundError encountered
+	// by resolvePlacement, if any. Kept on the scope instead of failing
+	// construction so reconciliation paths that must proceed without the
+	// zone (e.g. deletion) still get a usable scope.
+	failureDomainErr error
+
+	// proxmoxClient is the zone-resolved API client for this machine,
+	// resolved once at scope construction. clientErr records the resolution
+	// failure instead of failing construction, for the same reason as
+	// failureDomainErr; the controller gates on it before any Proxmox call.
+	proxmoxClient capmox.Client
+	clientErr     error
+
+	// templateSource is the effective template source, resolved once at
+	// scope construction: the zone's templateSource override when set,
+	// otherwise the machine's own template fields. Overrides are total,
+	// never merged.
+	templateSource infrav1.TemplateSource
 }
 
 // NewMachineScope creates a new MachineScope from the supplied parameters.
@@ -93,7 +121,7 @@ func NewMachineScope(params MachineScopeParams) (*MachineScope, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to init patch helper")
 	}
-	return &MachineScope{
+	m := &MachineScope{
 		Logger:      params.Logger,
 		client:      params.Client,
 		patchHelper: helper,
@@ -103,7 +131,142 @@ func NewMachineScope(params MachineScopeParams) (*MachineScope, error) {
 		InfraCluster:   params.InfraCluster,
 		ProxmoxMachine: params.ProxmoxMachine,
 		IPAMHelper:     params.IPAMHelper,
-	}, nil
+	}
+	m.failureDomainErr = m.resolvePlacement()
+	m.proxmoxClient, m.clientErr = m.InfraCluster.ClientForZone(context.TODO(), m.zone)
+	m.templateSource = m.resolveTemplateSource()
+	return m, nil
+}
+
+// FailureDomainNotFoundError is returned when the CAPI Machine references a
+// failure domain that is not configured in the ProxmoxCluster zones.
+type FailureDomainNotFoundError struct {
+	FailureDomain string
+}
+
+func (err FailureDomainNotFoundError) Error() string {
+	return fmt.Sprintf("failure domain %q not configured in ProxmoxCluster zones", err.FailureDomain)
+}
+
+// resolvePlacement resolves the machine's placement inputs once, at scope
+// construction. The precedence chains are:
+//
+//   - allowed nodes: failure domain zone nodes > ProxmoxMachine spec > ProxmoxCluster spec
+//   - zone: failure domain > Spec.Network.Zone > nil (the default zone)
+//
+// When the referenced failure domain is not configured in the ProxmoxCluster
+// zones it returns a FailureDomainNotFoundError; the remaining fields are
+// still resolved from the specs so the scope stays usable for paths that
+// must proceed anyway, such as deletion.
+func (m *MachineScope) resolvePlacement() error {
+	m.allowedNodes = m.ProxmoxMachine.Spec.AllowedNodes
+	if len(m.allowedNodes) == 0 {
+		m.allowedNodes = m.InfraCluster.ProxmoxCluster.Spec.AllowedNodes
+	}
+	if m.ProxmoxMachine.Spec.Network != nil {
+		m.zone = m.ProxmoxMachine.Spec.Network.Zone
+	}
+
+	faildom := m.Machine.Spec.FailureDomain
+	if faildom == "" {
+		return nil
+	}
+
+	m.zone = new(faildom)
+	if nodes := m.InfraCluster.ProxmoxCluster.GetZoneNodes(faildom); len(nodes) > 0 {
+		m.allowedNodes = nodes
+		return nil
+	}
+
+	// The zone may exist without an explicit node list; only a missing zone
+	// is an error.
+	for _, zc := range m.InfraCluster.ProxmoxCluster.Spec.ZoneConfigs {
+		if ptr.Deref(zc.Zone, "") == faildom {
+			return nil
+		}
+	}
+
+	return FailureDomainNotFoundError{FailureDomain: faildom}
+}
+
+// AllowedNodes returns the Proxmox nodes the machine may be placed on,
+// resolved once at scope construction. An empty result means any node.
+func (m *MachineScope) AllowedNodes() []string {
+	return m.allowedNodes
+}
+
+// Zone returns the zone the machine belongs to, resolved once at scope
+// construction. nil means the default zone.
+func (m *MachineScope) Zone() *string {
+	return m.zone
+}
+
+// FailureDomainError returns the FailureDomainNotFoundError encountered
+// while resolving placement, or nil. Callers that are about to provision
+// must treat a non-nil result as "failure domain not ready".
+func (m *MachineScope) FailureDomainError() error {
+	return m.failureDomainErr
+}
+
+// ProxmoxClient returns the Proxmox API client backing this machine's zone,
+// resolved once at scope construction. It is nil when ClientError is non-nil.
+func (m *MachineScope) ProxmoxClient() capmox.Client {
+	return m.proxmoxClient
+}
+
+// ClientError returns the error encountered while resolving the machine's
+// zone client, or nil. Callers about to talk to Proxmox must treat a non-nil
+// result as "zone client unavailable" and never fall back to another client.
+func (m *MachineScope) ClientError() error {
+	return m.clientErr
+}
+
+// resolveTemplateSource resolves the effective template source once, at
+// scope construction: the machine zone's templateSource override wins over
+// the machine's own template fields. The override is total, never merged —
+// templates cannot be cloned across Proxmox clusters, so a zone backed by
+// its own Proxmox cluster must describe a complete source.
+func (m *MachineScope) resolveTemplateSource() infrav1.TemplateSource {
+	zoneName := ptr.Deref(m.zone, "")
+	if zoneName != "" {
+		for _, zc := range m.InfraCluster.ProxmoxCluster.Spec.ZoneConfigs {
+			if ptr.Deref(zc.Zone, "") == zoneName && zc.TemplateSource != nil {
+				return *zc.TemplateSource
+			}
+		}
+	}
+
+	return m.ProxmoxMachine.Spec.TemplateSource
+}
+
+// SourceNode returns the effective Proxmox node to clone this machine from.
+func (m *MachineScope) SourceNode() string {
+	return ptr.Deref(m.templateSource.SourceNode, "")
+}
+
+// TemplateID returns the effective template vmid, or -1 when unset.
+func (m *MachineScope) TemplateID() int32 {
+	if m.templateSource.TemplateID != nil {
+		return *m.templateSource.TemplateID
+	}
+	return -1
+}
+
+// TemplateSelectorTags returns the effective template selector tags.
+func (m *MachineScope) TemplateSelectorTags() []string {
+	if m.templateSource.TemplateSelector != nil {
+		return m.templateSource.TemplateSelector.MatchTags
+	}
+	return nil
+}
+
+// TemplateMatchPolicy returns the effective template match policy,
+// defaulting to exact matching.
+func (m *MachineScope) TemplateMatchPolicy() infrav1.TemplateMatchPolicy {
+	if m.templateSource.TemplateSelector != nil && m.templateSource.TemplateSelector.MatchPolicy != "" {
+		return m.templateSource.TemplateSelector.MatchPolicy
+	}
+	return infrav1.TemplateMatchPolicyExact
 }
 
 // Name returns the ProxmoxMachine name.
@@ -137,7 +300,7 @@ func (m *MachineScope) LocateProxmoxNode() string {
 
 	node := m.InfraCluster.ProxmoxCluster.GetNode(m.Name(), util.IsControlPlaneMachine(m.Machine))
 	if node == "" {
-		node = m.ProxmoxMachine.GetSourceNode()
+		node = m.SourceNode()
 	}
 
 	return node
