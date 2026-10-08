@@ -255,6 +255,10 @@ release-templates: ## Generate release templates
 	@mkdir -p $(RELEASE_DIR)
 	cp templates/cluster-template*.yaml $(RELEASE_DIR)/
 
+.PHONY: validate-rollback
+validate-rollback: ## Check that no machines depend on multi-DC zones before rolling back to upstream.
+	hack/validate-rollback.sh
+
 
 ##@ e2e
 ## --------------------------------------

@@ -54,6 +54,7 @@ import (
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/internal/tlshelper"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/internal/webhook"
 	capmox "github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox"
+	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox/clientfactory"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox/goproxmox"
 	// +kubebuilder:scaffold:imports
 )
@@ -190,11 +191,16 @@ func main() {
 }
 
 func setupReconcilers(ctx context.Context, mgr ctrl.Manager, proxmoxClient capmox.Client) error {
+	// one manager-wide factory so credential-derived clients are cached
+	// across reconcilers and reconciles.
+	clientFactory := clientfactory.New()
+
 	if err := (&controller.ProxmoxClusterReconciler{
 		Client:        mgr.GetClient(),
 		Scheme:        mgr.GetScheme(),
 		Recorder:      mgr.GetEventRecorderFor("proxmoxcluster-controller"),
 		ProxmoxClient: proxmoxClient,
+		ClientFactory: clientFactory,
 	}).SetupWithManager(ctx, mgr); err != nil {
 		return fmt.Errorf("setting up ProxmoxCluster controller: %w", err)
 	}
@@ -203,6 +209,7 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager, proxmoxClient capmo
 		Scheme:        mgr.GetScheme(),
 		Recorder:      mgr.GetEventRecorderFor("proxmoxmachine-controller"),
 		ProxmoxClient: proxmoxClient,
+		ClientFactory: clientFactory,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setting up ProxmoxMachine controller: %w", err)
 	}

@@ -1,0 +1,112 @@
+# Elmec fork only — tag-driven release consumable by clusterctl.
+# Lives on the `elmec-main` default branch so upstream-bound PR branches
+# (cut from `main`) never carry it. Trigger: push a tag like v0.9.1-elmec.1
+# cut from elmec-main; workflow_dispatch re-releases an existing tag.
+#
+# Upstream's release.yml stays disabled on this fork: it would fire on any
+# v* tag (including mirrored upstream tags) and publishes draft releases,
+# which clusterctl cannot download.
+name: elmec-release
+
+on:
+  push:
+    tags:
+      - "v*-elmec*" # v0.9.1-elmec.1 — mirrored upstream v* tags never match
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing v*-elmec* tag to (re)release"
+        required: true
+
+permissions:
+  contents: write # create the GitHub release
+  packages: write # push the image to ghcr.io
+
+env:
+  IMAGE: ghcr.io/elmecoss/capmox
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set release tag
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+        run: echo "RELEASE_TAG=${TAG_INPUT:-${GITHUB_REF##refs/tags/}}" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ${{ env.IMAGE }}:${{ env.RELEASE_TAG }}
+
+      - name: Print image reference
+        run: echo "Pushed $IMAGE:$RELEASE_TAG"
+
+  release:
+    needs: image # never publish manifests before the image exists
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set release tag
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+        run: echo "RELEASE_TAG=${TAG_INPUT:-${GITHUB_REF##refs/tags/}}" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Generate release artifacts
+        run: |
+          # old=new rename form: a plain REPOSITORY=$IMAGE would not rewrite the
+          # manager image — kustomize matches on the ionos-cloud name declared in
+          # config/default/manager_image_patch.yaml.
+          make release-manifests "RELEASE_VERSION=$RELEASE_TAG" \
+            "REPOSITORY=ghcr.io/ionos-cloud/cluster-api-provider-proxmox=$IMAGE"
+          make release-templates
+
+      - name: Verify manifest points at the Elmec image
+        run: |
+          grep -q "image: $IMAGE:$RELEASE_TAG" out/infrastructure-components.yaml
+          ! grep -q "ghcr.io/ionos-cloud" out/infrastructure-components.yaml
+
+      - name: Generate patch-stack release notes
+        run: |
+          # generate_release_notes would diff against the previous semver tag and
+          # attribute every intermediate upstream commit to this fork release.
+          git remote add upstream https://github.com/ionos-cloud/cluster-api-provider-proxmox.git
+          git fetch upstream main --quiet
+          {
+            echo "Elmec patch stack on top of upstream ionos-cloud/cluster-api-provider-proxmox:"
+            echo
+            echo '```'
+            git log --oneline --no-merges upstream/main..HEAD
+            echo '```'
+          } > "$RUNNER_TEMP/notes.md"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          draft: false # drafts are invisible to clusterctl
+          prerelease: true # semver prerelease; never becomes GitHub "latest"
+          files: out/*
+          body_path: ${{ runner.temp }}/notes.md

@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -148,6 +149,41 @@ type ZoneConfigSpec struct {
 	// +listType=set
 	// +kubebuilder:validation:MinItems=1
 	DNSServers []string `json:"dnsServers,omitempty"`
+
+	// nodes specifies the Proxmox nodes that belong to this zone.
+	// When set, machines assigned to this failure domain will only
+	// be placed on these nodes.
+	// +optional
+	// +listType=set
+	Nodes []string `json:"nodes,omitempty"`
+
+	// controlPlaneEligible indicates whether control plane machines may be
+	// placed in this zone. Defaults to true when not set.
+	// +optional
+	ControlPlaneEligible *bool `json:"controlPlaneEligible,omitempty"`
+
+	// credentialsRef is a reference to a Secret that contains the Proxmox API
+	// credentials (keys: url, token, secret; optional: insecure, root_ca) for
+	// the Proxmox cluster backing this zone. When not set, the cluster-level
+	// credentials are used and behavior is identical to a single-endpoint
+	// setup. If no namespace is provided, the namespace of the ProxmoxCluster
+	// will be used.
+	// +optional
+	CredentialsRef *corev1.SecretReference `json:"credentialsRef,omitempty"`
+
+	// templateSource overrides the machine template source for machines
+	// placed in this zone. This is required in practice when the zone is
+	// backed by a different Proxmox cluster, because templates cannot be
+	// cloned across Proxmox clusters. When not set, the machine's own
+	// sourceNode/templateID/templateSelector are used. The override is total:
+	// zone and machine template sources are never merged.
+	//
+	// Completeness (templateSelector, or templateID with sourceNode) is
+	// enforced by the CEL rule on the TemplateSource type; stricter
+	// field-level XOR rules exceed the CEL cost budget inside a list item.
+	// +optional
+	// +structType=atomic
+	TemplateSource *TemplateSource `json:"templateSource,omitempty,omitzero"`
 }
 
 // IPConfigSpec contains information about available IP config.
@@ -232,6 +268,14 @@ type ProxmoxClusterStatus struct {
 	// for different machines.
 	// +optional
 	NodeLocations *NodeLocations `json:"nodeLocations,omitempty"`
+
+	// failureDomains is a slice of failure domains synced from zone configurations.
+	// This field is part of the Cluster API contract and is used by KubeadmControlPlane
+	// to distribute control plane machines across zones.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	FailureDomains []clusterv1.FailureDomain `json:"failureDomains,omitempty"`
 }
 
 // ProxmoxClusterInitializationStatus provides observations of the ProxmoxCluster initialization process.
@@ -369,12 +413,12 @@ func (c *ProxmoxCluster) AddInClusterZoneRef(pool client.Object) {
 	}
 
 	index := slices.IndexFunc(c.Status.InClusterZoneRef, func(r InClusterZoneRef) bool {
-		return *r.Zone == zone
+		return ptr.Deref(r.Zone, "") == zone
 	})
 
 	if index < 0 {
 		c.Status.InClusterZoneRef = append(c.Status.InClusterZoneRef, InClusterZoneRef{Zone: &zone})
-		index = len(c.Status.InClusterZoneRef)
+		index = len(c.Status.InClusterZoneRef) - 1
 	}
 
 	poolRef := corev1.LocalObjectReference{Name: pool.GetName()}
@@ -457,10 +501,11 @@ func (c *ProxmoxCluster) RemoveNodeLocation(machineName string, isControlPlane b
 // If the node location does not exist, it will be added.
 //
 // The function returns true if the value was added or updated, otherwise false.
-func (c *ProxmoxCluster) UpdateNodeLocation(machineName, node string, isControlPlane bool) bool {
+func (c *ProxmoxCluster) UpdateNodeLocation(machineName, node string, zone Zone, isControlPlane bool) bool {
 	if !c.HasMachine(machineName, isControlPlane) {
 		loc := NodeLocation{
 			Node:    node,
+			Zone:    zone,
 			Machine: corev1.LocalObjectReference{Name: machineName},
 		}
 		c.AddNodeLocation(loc, isControlPlane)
@@ -474,12 +519,18 @@ func (c *ProxmoxCluster) UpdateNodeLocation(machineName, node string, isControlP
 
 	for i, loc := range locations {
 		if loc.Machine.Name == machineName {
+			updated := false
 			if loc.Node != node {
 				locations[i].Node = node
-				return true
+				updated = true
+			}
+			// repair a missing zone: earlier versions dropped it on update.
+			if loc.Zone == nil && zone != nil {
+				locations[i].Zone = zone
+				updated = true
 			}
 
-			return false
+			return updated
 		}
 	}
 
@@ -521,6 +572,35 @@ func (c *ProxmoxCluster) addNodeLocation(loc NodeLocation, isControlPlane bool) 
 	}
 
 	c.Status.NodeLocations.Workers = append(c.Status.NodeLocations.Workers, loc)
+}
+
+// GetZoneNodes returns the Proxmox node names for a given zone name.
+// Returns nil if the zone is not found or has no explicit nodes configured.
+func (c *ProxmoxCluster) GetZoneNodes(zoneName string) []string {
+	for _, zc := range c.Spec.ZoneConfigs {
+		if ptr.Deref(zc.Zone, "") == zoneName {
+			return zc.Nodes
+		}
+	}
+
+	return nil
+}
+
+// GetZoneDNSServers returns the DNS servers configured for a given zone.
+// Returns nil if the zone is not found or has no DNS servers configured.
+func (c *ProxmoxCluster) GetZoneDNSServers(zone Zone) []string {
+	zoneName := ptr.Deref(zone, "")
+	if zoneName == "" {
+		return nil
+	}
+
+	for _, zc := range c.Spec.ZoneConfigs {
+		if ptr.Deref(zc.Zone, "") == zoneName {
+			return zc.DNSServers
+		}
+	}
+
+	return nil
 }
 
 func init() {
