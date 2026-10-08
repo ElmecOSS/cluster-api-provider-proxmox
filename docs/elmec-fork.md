@@ -11,6 +11,13 @@ its own clusterctl-consumable releases, while staying a drop-in replacement
 - **`main`** — pure fast-forward mirror of upstream `main`. Never carries Elmec
   commits. Upstream-bound PR branches are cut from here. Synced daily at
   05:17 UTC by `elmec-sync.yml` (fails loudly if it cannot fast-forward).
+  The sync pushes with the `ELMEC_SYNC_TOKEN` repository secret: the
+  built-in `GITHUB_TOKEN` is refused whenever an upstream commit touches
+  `.github/workflows/*` (e.g. dependabot action bumps), which happens most
+  weeks. The secret is a fine-grained PAT limited to this repository with
+  **Contents** and **Workflows** set to read/write; rotate it before it
+  expires (`gh secret set ELMEC_SYNC_TOKEN -R ElmecOSS/cluster-api-provider-proxmox`).
+  Manual fallback: `git fetch upstream && git push origin upstream/main:main`.
   The sync does **not** copy upstream tags — push them manually:
   `git fetch upstream --tags && git push origin --tags`.
 - **`elmec-main`** (default branch) — the patch stack: upstream `main` plus, in
