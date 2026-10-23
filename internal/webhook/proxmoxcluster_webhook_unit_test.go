@@ -88,8 +88,11 @@ func TestValidateZoneNodes(t *testing.T) {
 		require.ErrorContains(t, validateZoneNodes(cluster), "must list its nodes when spec.allowedNodes is set")
 	})
 
-	t.Run("same node name in zones on different endpoints is allowed", func(t *testing.T) {
-		// Node names are only unique within one Proxmox cluster.
+	t.Run("same node name in zones with different credentialsRef is allowed", func(t *testing.T) {
+		// Node names are only unique within one Proxmox cluster, so two
+		// datacenters each having a pve1 is the normal case. Distinct refs
+		// are assumed to be distinct endpoints; the webhook cannot read the
+		// secrets to confirm it.
 		cluster := zonedCluster(
 			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-a"), Nodes: []string{"pve1"}, CredentialsRef: creds("creds-a")},
 			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-b"), Nodes: []string{"pve1"}, CredentialsRef: creds("creds-b")},
@@ -113,7 +116,7 @@ func TestValidateZoneNodes(t *testing.T) {
 			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-a"), Nodes: []string{"pve1"}, CredentialsRef: creds("shared")},
 			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-b"), Nodes: []string{"pve1"}, CredentialsRef: creds("shared")},
 		)
-		require.ErrorContains(t, validateZoneNodes(cluster), "served by the same Proxmox endpoint")
+		require.ErrorContains(t, validateZoneNodes(cluster), "declares the same credentialsRef")
 	})
 
 	t.Run("disjoint node lists on the cluster endpoint are fine", func(t *testing.T) {

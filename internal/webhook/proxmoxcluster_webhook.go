@@ -184,14 +184,30 @@ func validateZoneCredentials(cluster *infrav1.ProxmoxCluster) error {
 //     scheduler does not run at all and the machine lands on its template's
 //     node, which is on the zone endpoint. That combination stays valid.
 //
-//  2. A node may not appear in two zones served by the same endpoint, because
-//     that is one physical host in two failure domains and the isolation the
-//     zones promise would not hold. The same name in zones served by
-//     different endpoints is fine and expected: node names are only unique
-//     within one Proxmox cluster.
+//  2. A node may not appear in two zones that *declare* the same endpoint,
+//     because that is one physical host in two failure domains and the
+//     isolation the zones promise would not hold. The same name in zones
+//     declaring different endpoints is fine and expected: node names are only
+//     unique within one Proxmox cluster.
+//
+// Note what rule 2 can and cannot see. The webhook is stateless by design —
+// failurePolicy is fail and sideEffects none — so it judges endpoints by the
+// credentialsRef written in the spec, not by the URL inside the secret. Two
+// zones sharing a credentialsRef, or both leaving it unset, provably share an
+// endpoint and are checked. Two zones naming *different* secrets are assumed
+// to be different endpoints, and nothing here notices if those secrets happen
+// to point at the same Proxmox cluster — a plausible mistake when someone
+// gives a zone its own secret for the endpoint the cluster already uses.
+//
+// The approximation only ever misses a conflict, never invents one, so it is
+// safe to rely on what it rejects. Closing the gap means comparing resolved
+// endpoints, which the cluster controller could do when it builds the zone
+// clients; it does not belong in admission, where it would make editing a
+// cluster depend on a secret being readable.
 func validateZoneNodes(cluster *infrav1.ProxmoxCluster) error {
-	// Zones sharing a credentialsRef share an endpoint; no credentialsRef
-	// means the cluster-level one.
+	// Zones sharing a credentialsRef demonstrably share an endpoint; no
+	// credentialsRef means the cluster-level one. Distinct refs are taken as
+	// distinct endpoints, which is an assumption, not a fact — see above.
 	endpointOf := func(zc infrav1.ZoneConfigSpec) string {
 		if zc.CredentialsRef == nil {
 			return ""
@@ -230,7 +246,7 @@ func validateZoneNodes(cluster *infrav1.ProxmoxCluster) error {
 						field.Invalid(
 							field.NewPath("spec", "zoneConfig").Index(i).Child("nodes"),
 							node,
-							fmt.Sprintf("already belongs to zone %q, which is served by the same Proxmox endpoint; one host cannot be in two failure domains", prev.zone)),
+							fmt.Sprintf("already belongs to zone %q, which declares the same credentialsRef; one host cannot be in two failure domains", prev.zone)),
 					})
 			}
 			seen[key] = placement{zone: zoneName, index: i}
