@@ -200,6 +200,32 @@ func TestMachineScope_ResolvePlacement(t *testing.T) {
 		}
 	}
 
+	t.Run("a zone on its own endpoint without nodes holds back provisioning", func(t *testing.T) {
+		remote := &infrav1.ProxmoxCluster{
+			Spec: infrav1.ProxmoxClusterSpec{
+				AllowedNodes: []string{"cluster-node1"},
+				ZoneConfigs: []infrav1.ZoneConfigSpec{{
+					Zone:           new("zone-remote"),
+					CredentialsRef: &corev1.SecretReference{Name: "creds"},
+				}},
+			},
+		}
+		scope := &MachineScope{
+			Machine:        &clusterv1.Machine{Spec: clusterv1.MachineSpec{FailureDomain: "zone-remote"}},
+			InfraCluster:   &ClusterScope{ProxmoxCluster: remote},
+			ProxmoxMachine: &infrav1.ProxmoxMachine{},
+		}
+		require.ErrorAs(t, scope.resolvePlacement(), &ZoneNodesMissingError{})
+
+		// A machine that already holds a VM is never scheduled again, so the
+		// same configuration must not stall its reconcile: doing so would
+		// report a running machine as not provisioned.
+		scope.ProxmoxMachine = &infrav1.ProxmoxMachine{
+			Spec: infrav1.ProxmoxMachineSpec{VirtualMachineID: new(int64(123))},
+		}
+		require.NoError(t, scope.resolvePlacement())
+	})
+
 	t.Run("machine spec nodes take precedence over cluster spec", func(t *testing.T) {
 		scope := newScope("", &infrav1.ProxmoxMachine{
 			Spec: infrav1.ProxmoxMachineSpec{AllowedNodes: []string{"spec-node1"}},
