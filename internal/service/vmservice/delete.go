@@ -56,6 +56,17 @@ func DeleteVM(ctx context.Context, machineScope *scope.MachineScope) error {
 }
 
 // VMNotFound checks if the given err is related to that the VM is not found in Proxmox.
+//
+// The test is a substring match because Proxmox reports a missing VM as a
+// missing config file rather than a typed error. That phrasing is also what it
+// returns for a VM that exists but whose config is not on the node asked --
+// during a clone onto a node other than the template's, for instance -- so
+// ErrVMNotOnNode is excluded explicitly: acting on it would drop the finalizer
+// of a VM that is about to exist.
 func VMNotFound(err error) bool {
+	if errors.Is(err, goproxmox.ErrVMNotOnNode) {
+		return false
+	}
+
 	return strings.Contains(err.Error(), "does not exist")
 }

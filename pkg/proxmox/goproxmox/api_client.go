@@ -39,6 +39,12 @@ var _ capmox.Client = &APIClient{}
 // ErrVMIDFree is returned if the VMID is free.
 var ErrVMIDFree = errors.New("VMID is free")
 
+// ErrVMNotOnNode is returned when the cluster still has a VMID registered but
+// the VM cannot be read on the node it was expected on. It is deliberately not
+// an "is gone" answer: the VM exists somewhere, so a caller holding a finalizer
+// has to keep holding it.
+var ErrVMNotOnNode = errors.New("VM is registered on the cluster but not readable on that node")
+
 // APIClient Proxmox API client object.
 type APIClient struct {
 	*proxmox.Client
@@ -242,7 +248,14 @@ func (c *APIClient) DeleteVM(ctx context.Context, nodeName string, vmID int64) (
 
 	vm, err := node.VirtualMachine(ctx, int(vmID))
 	if err != nil {
-		return nil, fmt.Errorf("cannot find vm with id %d: %w", vmID, err)
+		// CheckID just reported the ID as taken, so the VM exists on this
+		// cluster. Proxmox answers for a config file that is not on this node
+		// with the same "does not exist" it uses for a VM that never existed,
+		// and a clone onto a node other than the template's writes that config
+		// only once it completes. Letting the two look alike means a machine
+		// deleted mid-clone drops its finalizer and the VM finishes cloning
+		// with nothing left to manage it.
+		return nil, fmt.Errorf("%w: id %d on node %s: %w", ErrVMNotOnNode, vmID, nodeName, err)
 	}
 
 	if vm.IsRunning() {
