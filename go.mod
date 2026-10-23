@@ -27,6 +27,7 @@ require (
 	golang.org/x/tools v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.34.11
+	k8s.io/apiextensions-apiserver v0.34.11
 	k8s.io/apimachinery v0.34.11
 	k8s.io/client-go v0.34.11
 	k8s.io/klog/v2 v2.140.0
@@ -348,7 +349,7 @@ require (
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/exp/typeparams v0.0.0-20260209203927-2842357ff358 // indirect
 	golang.org/x/mod v0.41.0 // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
@@ -366,7 +367,6 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	honnef.co/go/tools v0.7.0 // indirect
-	k8s.io/apiextensions-apiserver v0.34.11 // indirect
 	k8s.io/apiserver v0.34.11 // indirect
 	k8s.io/cluster-bootstrap v0.34.11 // indirect
 	k8s.io/code-generator v0.34.11 // indirect
