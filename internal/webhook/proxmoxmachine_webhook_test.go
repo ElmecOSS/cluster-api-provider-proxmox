@@ -33,6 +33,21 @@ var _ = Describe("Controller Test", func() {
 	g := NewWithT(GinkgoT())
 
 	Context("create proxmox machine", func() {
+		// A schema whose maximum does not fit its own format is rejected by
+		// the API server for every object that sets the field, so a VRF with
+		// an ordinary routing table could not be created at all. The sibling
+		// priority field is an int64 and may keep the u32 maximum; table is
+		// an int32 and may not.
+		It("should accept a vrf with an ordinary routing table", func() {
+			machine := validProxmoxMachine("test-machine-vrf")
+			machine.Spec.Network.VRFs = []infrav1.VRFDevice{{
+				Name:       "vrf-blue",
+				Table:      100,
+				Interfaces: []infrav1.NetName{"net0"},
+			}}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &machine)).To(Succeed())
+		})
+
 		It("should disallow invalid network mtu", func() {
 			machine := invalidMTUProxmoxMachine("test-machine")
 			g.Expect(k8sClient.Create(testEnv.GetContext(), &machine)).To(MatchError(ContainSubstring("invalid MTU value")))

@@ -420,8 +420,13 @@ type VRFDevice struct {
 	Name string `json:"name,omitempty"`
 
 	// table is the ID of the routing table used for the l3mdev vrf device.
+	// Linux routing table IDs are u32, but this field is an int32 all the way
+	// down to the renderers, so the maximum is the largest value that type can
+	// carry. A maximum above it is not merely unreachable: it makes the schema
+	// contradict its own int32 format, and the API server then rejects every
+	// object that sets the field at all.
 	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=4294967295
+	// +kubebuilder:validation:Maximum=2147483647
 	// +kubebuilder:validation:XValidation:message="Cowardly refusing to insert l3mdev rules into kernel tables",rule="(self > 0 && self < 254) || (self > 255)"
 	// +required
 	Table int32 `json:"table,omitempty"`
