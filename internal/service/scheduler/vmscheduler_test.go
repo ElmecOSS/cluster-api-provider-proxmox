@@ -942,3 +942,102 @@ func setupClient() client.Client {
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 	return fakeClient
 }
+
+func giBytes(in int) uint64 {
+	return uint64(in) * 1024 * 1024 * 1024
+}
+
+// twoCoreMachine is the request shared by the scoring-scale tests below:
+// 2GiB of memory and 2 CPU cores.
+func twoCoreMachine() *infrav1.ProxmoxMachine {
+	return &infrav1.ProxmoxMachine{
+		Spec: infrav1.ProxmoxMachineSpec{
+			MemoryMiB:  ptr.To(int32(2048)),
+			NumSockets: ptr.To(int32(1)),
+			NumCores:   ptr.To(int32(2)),
+		},
+	}
+}
+
+// TestScoringMeasuresSaturationAgainstTheAllocatableCap pins the bottom of the
+// score when an adjustment below 100 caps allocation under the physical size.
+//
+// pve2 has spent 20 of the 25GiB it is allowed to hand out, pve1 only 5. Judged
+// against the 100GiB the hosts physically carry, pve2 still looks 78% free and
+// its better CPU headroom carries the decision. Judged against the cap the
+// operator actually set, pve2 is nearly full and pve1 wins — which is the point
+// of underprovisioning: the reserved headroom is not available capacity.
+func TestScoringMeasuresSaturationAgainstTheAllocatableCap(t *testing.T) {
+	cl := fakeResourceClient{
+		memory:      map[string]uint64{"pve1": giBytes(20), "pve2": giBytes(5)},
+		memoryTotal: map[string]uint64{"pve1": giBytes(25), "pve2": giBytes(25)},
+		cpus:        map[string]int{"pve1": 6, "pve2": 21},
+		cpusTotal:   map[string]int{"pve1": 32, "pve2": 32},
+	}
+
+	node, err := selectNode(context.Background(), cl, twoCoreMachine(), nil,
+		[]string{"pve1", "pve2"}, &infrav1.SchedulerHints{
+			MemoryAdjustment: ptr.To(int64(25)),
+			CPUAdjustment:    ptr.To(int64(100)),
+			MemoryTolerance:  ptr.To(int64(0)),
+			CPUTolerance:     ptr.To(int64(0)),
+		})
+
+	require.NoError(t, err)
+	require.Equal(t, "pve1", node)
+}
+
+// TestDisabledMemoryDoesNotDecide checks that memoryAdjustment 0 means what the
+// field says: memory stops being a scheduling constraint.
+//
+// With it set, the client reports the whole node as both allocatable and
+// available. Scoring that would rank nodes by raw size — the 400GiB pve1 scores
+// 0.990 against the 100GiB pve2's 0.960 on a resource that is switched off —
+// and that gap is enough to outweigh pve2's real CPU advantage.
+func TestDisabledMemoryDoesNotDecide(t *testing.T) {
+	cl := fakeResourceClient{
+		memory:      map[string]uint64{"pve1": giBytes(400), "pve2": giBytes(100)},
+		memoryTotal: map[string]uint64{"pve1": giBytes(400), "pve2": giBytes(100)},
+		cpus:        map[string]int{"pve1": 10, "pve2": 11},
+		cpusTotal:   map[string]int{"pve1": 32, "pve2": 32},
+	}
+
+	node, err := selectNode(context.Background(), cl, twoCoreMachine(), nil,
+		[]string{"pve1", "pve2"}, &infrav1.SchedulerHints{
+			MemoryAdjustment: ptr.To(int64(0)),
+			CPUAdjustment:    ptr.To(int64(100)),
+			MemoryTolerance:  ptr.To(int64(0)),
+			CPUTolerance:     ptr.To(int64(0)),
+		})
+
+	require.NoError(t, err)
+	require.Equal(t, "pve2", node, "the node with more free CPU must win when memory is disabled")
+}
+
+// TestPendingBreaksTieWhenNothingElseDoes covers the last resort. With both
+// adjustments at 0 every score is 0 and, on identical hardware, the reported
+// availability is identical too — so without counting placements a burst would
+// pick the same node every time.
+func TestPendingBreaksTieWhenNothingElseDoes(t *testing.T) {
+	cl := fakeResourceClient{
+		memory:      map[string]uint64{"pve1": giBytes(100), "pve2": giBytes(100)},
+		memoryTotal: map[string]uint64{"pve1": giBytes(100), "pve2": giBytes(100)},
+	}
+	locations := []infrav1.NodeLocation{{Node: "pve1"}}
+
+	node, err := selectNode(context.Background(), cl, twoCoreMachine(), locations,
+		[]string{"pve1", "pve2"}, &infrav1.SchedulerHints{
+			MemoryAdjustment: ptr.To(int64(0)),
+			CPUAdjustment:    ptr.To(int64(0)),
+		})
+
+	require.NoError(t, err)
+	require.Equal(t, "pve2", node)
+}
+
+// TestBuildInsufficientErrorOnEmptyNodeList guards the indexing below it:
+// callers gate on a non-empty allowed-node list, and this must report that
+// rather than panic if one ever stops.
+func TestBuildInsufficientErrorOnEmptyNodeList(t *testing.T) {
+	require.ErrorContains(t, buildInsufficientError(nil, miBytes(8), 2), "allowed node list is empty")
+}
