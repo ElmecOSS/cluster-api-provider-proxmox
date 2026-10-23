@@ -51,8 +51,11 @@ func reconcileIPAddresses(ctx context.Context, machineScope *scope.MachineScope)
 
 	if pm.Spec.Network != nil {
 		if requeue, err = handleDevices(ctx, machineScope, netPoolAddresses); err != nil || requeue {
+			// A plain requeue is not a failure. This branch used to wrap the
+			// nil error, which happens to return nil, so it read as though it
+			// were reporting something it never could.
 			if err == nil {
-				return true, errors.Wrap(err, "requeuing network reconcillation")
+				return true, nil
 			}
 			return true, errors.Wrap(err, "unable to handle network devices")
 		}
@@ -61,6 +64,15 @@ func reconcileIPAddresses(ctx context.Context, machineScope *scope.MachineScope)
 	// TODO: move to own state machine stage. Doesn't belong here, really
 	defaultDevicePools := netPoolAddresses["default"]
 	for _, ipAddresses := range defaultDevicePools {
+		// collectDeviceAddresses seeds this map with an empty slice per
+		// default pool and only fills it once a claim resolves, so an entry
+		// can be empty. Today an unresolved claim also sets requeue and the
+		// caller returns above, but that is an invariant two functions apart
+		// and nothing states it; indexing on the strength of it would panic
+		// the controller if it ever stopped holding.
+		if len(ipAddresses) == 0 {
+			continue
+		}
 		// Todo: This is not necessarily the default IP.
 		_, err := setVMIPAddressTag(ctx, machineScope, ipAddresses[0])
 		if err != nil {
