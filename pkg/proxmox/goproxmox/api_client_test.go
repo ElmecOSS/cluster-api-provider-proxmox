@@ -889,3 +889,29 @@ func TestProxmoxAPIClient_GetReservableCPUCores(t *testing.T) {
 		require.ErrorContains(t, err, "cannot list containers for node test")
 	})
 }
+
+// A VM being cloned onto a node other than the template's has no config file
+// there until the clone finishes, and Proxmox reports that with the same
+// "does not exist" it uses for a VM that never existed. The cluster-wide ID
+// check has already said the ID is taken, so this must not read as "gone":
+// callers key the removal of their finalizer on that distinction.
+func TestProxmoxAPIClient_DeleteVMMidCloneIsNotGone(t *testing.T) {
+	client := newTestClient(t)
+
+	httpmock.RegisterResponder(http.MethodGet, `=~/nodes/target/status`,
+		newJSONResponder(200, proxmox.Node{Name: "target"}))
+	httpmock.RegisterResponder(http.MethodGet, `=~/cluster/status`,
+		newJSONResponder(200, proxmox.NodeStatuses{{Name: "target"}, {Name: "source"}}))
+	// The ID is taken cluster-wide: the clone is in flight.
+	httpmock.RegisterResponder(http.MethodGet, `=~/cluster/nextid`,
+		newJSONResponder(400, "VM 123 already exists"))
+	// ...but its config has not landed on the destination node yet.
+	httpmock.RegisterResponder(http.MethodGet, `=~/nodes/target/qemu/123/status/current`,
+		newJSONResponder(500, "Configuration file 'nodes/target/qemu-server/123.conf' does not exist"))
+
+	task, err := client.DeleteVM(context.Background(), "target", 123)
+
+	require.Nil(t, task)
+	require.ErrorIs(t, err, ErrVMNotOnNode)
+	require.NotErrorIs(t, err, ErrVMIDFree)
+}
