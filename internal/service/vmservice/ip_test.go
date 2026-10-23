@@ -33,6 +33,7 @@ import (
 	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	. "github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/consts"
 	ipam "github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/kubernetes/ipam"
+	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/scope"
 )
 
 const ipTag = "ip_net0_10.10.10.10"
@@ -700,4 +701,34 @@ func TestReconcileIPAddresses_MachineIPPoolRef(t *testing.T) {
 	)
 
 	requireConditionIsFalse(t, machineScope.ProxmoxMachine, infrav1.ProxmoxMachineVirtualMachineProvisionedCondition)
+}
+
+// collectDeviceAddresses seeds the synthetic "default" net with an empty slice
+// per default pool and only fills it once a claim resolves to an address. An
+// unresolved claim therefore leaves an empty entry behind, which is why the
+// caller must not index into those slices on faith: today it is shielded by
+// the requeue this also asserts, but that invariant lives two functions away
+// from the indexing it protects.
+func TestCollectDeviceAddresses_UnresolvedClaimLeavesAnEmptyDefaultPool(t *testing.T) {
+	machineScope, _, _ := setupReconcilerTest(t)
+	machineScope.ProxmoxMachine.Spec.Network = &infrav1.NetworkSpec{
+		NetworkDevices: []infrav1.NetworkDevice{{
+			Name:        infrav1.DefaultNetworkDevice,
+			DefaultIPv4: new(true),
+		}},
+	}
+
+	addresses := make(map[infrav1.NetName]map[corev1.TypedLocalObjectReference][]ipamv1.IPAddress)
+	var neverResolves ipAddressResolver = func(context.Context, *scope.MachineScope, ipam.IPClaimDef) ([]ipamv1.IPAddress, error) {
+		return nil, nil
+	}
+
+	requeue, err := collectDeviceAddresses(context.Background(), machineScope, addresses, neverResolves)
+	require.NoError(t, err)
+	require.True(t, requeue, "an unresolved claim has to ask for a requeue")
+
+	require.NotEmpty(t, addresses["default"], "the default pool entry is created up front")
+	for pool, addrs := range addresses["default"] {
+		require.Empty(t, addrs, "pool %s should still be empty", pool.Name)
+	}
 }
