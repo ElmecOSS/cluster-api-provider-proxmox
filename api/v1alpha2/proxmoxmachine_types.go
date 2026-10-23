@@ -369,6 +369,10 @@ type RouteSpec struct {
 	// +optional
 	Metric *int32 `json:"metric,omitempty"`
 	// table is the routing table used for this route.
+	// A routing table ID is never negative; the renderers write it straight
+	// into the guest's network configuration, where a negative value is
+	// refused and the machine comes up without networking.
+	// +kubebuilder:validation:Minimum=0
 	// +optional
 	Table *int32 `json:"table,omitempty"`
 
@@ -390,6 +394,10 @@ type RoutingPolicySpec struct {
 	From *string `json:"from,omitempty"`
 
 	// table is the routing table ID.
+	// A routing table ID is never negative; the renderers write it straight
+	// into the guest's network configuration, where a negative value is
+	// refused and the machine comes up without networking.
+	// +kubebuilder:validation:Minimum=0
 	// +optional
 	Table *int32 `json:"table,omitempty"`
 
