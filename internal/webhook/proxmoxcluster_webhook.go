@@ -290,7 +290,7 @@ func zoneSchedulerHintsWarnings(cluster *infrav1.ProxmoxCluster) admission.Warni
 
 		if len(dropped) > 0 {
 			warnings = append(warnings, fmt.Sprintf(
-				"spec.zoneConfig[%d].schedulerHints overrides the cluster hints as a whole, so %s fall back to the built-in defaults rather than the cluster values; set them on the zone to keep them",
+				"spec.zoneConfig[%d].schedulerHints overrides the cluster hints as a whole: the cluster values for %s are not inherited and fall back to the built-in defaults; set them on the zone to keep them",
 				i, strings.Join(dropped, ", ")))
 		}
 	}
