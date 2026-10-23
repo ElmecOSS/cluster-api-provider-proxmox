@@ -64,6 +64,67 @@ func TestValidateZoneCredentials(t *testing.T) {
 	require.ErrorContains(t, err, "reserved name")
 }
 
+func TestValidateZoneNodes(t *testing.T) {
+	zonedCluster := func(zones ...infrav1.ZoneConfigSpec) *infrav1.ProxmoxCluster {
+		cluster := validProxmoxCluster("zone-nodes-cluster")
+		cluster.Spec.ZoneConfigs = zones
+		return &cluster
+	}
+	creds := func(name string) *corev1.SecretReference {
+		return &corev1.SecretReference{Name: name, Namespace: "default"}
+	}
+
+	t.Run("own endpoint without nodes is fine when there is nothing to inherit", func(t *testing.T) {
+		// No cluster-level allowedNodes means the scheduler never runs: the
+		// machine lands on its template's node, which is on the zone endpoint.
+		cluster := zonedCluster(infrav1.ZoneConfigSpec{Zone: ptr.To("zone-a"), CredentialsRef: creds("creds-a")})
+		cluster.Spec.AllowedNodes = nil
+		require.NoError(t, validateZoneNodes(cluster))
+	})
+
+	t.Run("own endpoint without nodes inherits a foreign node list", func(t *testing.T) {
+		cluster := zonedCluster(infrav1.ZoneConfigSpec{Zone: ptr.To("zone-a"), CredentialsRef: creds("creds-a")})
+		cluster.Spec.AllowedNodes = []string{"pve1", "pve2"}
+		require.ErrorContains(t, validateZoneNodes(cluster), "must list its nodes when spec.allowedNodes is set")
+	})
+
+	t.Run("same node name in zones on different endpoints is allowed", func(t *testing.T) {
+		// Node names are only unique within one Proxmox cluster.
+		cluster := zonedCluster(
+			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-a"), Nodes: []string{"pve1"}, CredentialsRef: creds("creds-a")},
+			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-b"), Nodes: []string{"pve1"}, CredentialsRef: creds("creds-b")},
+		)
+		require.NoError(t, validateZoneNodes(cluster))
+	})
+
+	t.Run("same node in two zones on the same endpoint is rejected", func(t *testing.T) {
+		// One host cannot be in two failure domains.
+		cluster := zonedCluster(
+			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-a"), Nodes: []string{"pve1", "pve2"}},
+			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-b"), Nodes: []string{"pve2", "pve3"}},
+		)
+		err := validateZoneNodes(cluster)
+		require.ErrorContains(t, err, "pve2")
+		require.ErrorContains(t, err, "already belongs to zone \"zone-a\"")
+	})
+
+	t.Run("same node in two zones sharing one credentialsRef is rejected", func(t *testing.T) {
+		cluster := zonedCluster(
+			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-a"), Nodes: []string{"pve1"}, CredentialsRef: creds("shared")},
+			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-b"), Nodes: []string{"pve1"}, CredentialsRef: creds("shared")},
+		)
+		require.ErrorContains(t, validateZoneNodes(cluster), "served by the same Proxmox endpoint")
+	})
+
+	t.Run("disjoint node lists on the cluster endpoint are fine", func(t *testing.T) {
+		cluster := zonedCluster(
+			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-a"), Nodes: []string{"pve1", "pve2"}},
+			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-b"), Nodes: []string{"pve3"}},
+		)
+		require.NoError(t, validateZoneNodes(cluster))
+	})
+}
+
 func TestValidateZoneRemoval_DeniesWithLiveMachines(t *testing.T) {
 	oldCluster := clusterWithZone("zone-a", &corev1.SecretReference{Name: "creds-a"})
 

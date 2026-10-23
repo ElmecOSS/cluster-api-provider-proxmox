@@ -86,6 +86,10 @@ func (*ProxmoxCluster) ValidateCreate(_ context.Context, obj runtime.Object) (wa
 		return warnings, err
 	}
 
+	if err := validateZoneNodes(cluster); err != nil {
+		return warnings, err
+	}
+
 	return warnings, nil
 }
 
@@ -107,6 +111,10 @@ func (*ProxmoxCluster) ValidateUpdate(_ context.Context, oldObj runtime.Object, 
 	}
 
 	if err := validateZoneCredentials(newCluster); err != nil {
+		return warnings, err
+	}
+
+	if err := validateZoneNodes(newCluster); err != nil {
 		return warnings, err
 	}
 
@@ -150,6 +158,79 @@ func validateZoneCredentials(cluster *infrav1.ProxmoxCluster) error {
 						field.NewPath("spec", "zoneConfig").Index(i).Child("credentialsRef", "name"),
 						zc.CredentialsRef.Name, "credentialsRef must name a secret"),
 				})
+		}
+	}
+
+	return nil
+}
+
+// validateZoneNodes keeps a zone's node list consistent with the Proxmox
+// endpoint that serves it.
+//
+// Two rules, both about the same failure: asking one endpoint about a node
+// that lives on another.
+//
+//  1. A zone with its own credentialsRef must list its nodes whenever the
+//     cluster declares allowedNodes. Without them a machine in that zone
+//     inherits the cluster-level list, which names nodes of the cluster
+//     endpoint, while its client talks to the zone endpoint. Every scheduling
+//     attempt then queries names that do not exist there — or, when a name
+//     happens to exist on both, silently reads the wrong host.
+//
+//     With no cluster-level allowedNodes there is nothing to inherit: the
+//     scheduler does not run at all and the machine lands on its template's
+//     node, which is on the zone endpoint. That combination stays valid.
+//
+//  2. A node may not appear in two zones served by the same endpoint, because
+//     that is one physical host in two failure domains and the isolation the
+//     zones promise would not hold. The same name in zones served by
+//     different endpoints is fine and expected: node names are only unique
+//     within one Proxmox cluster.
+func validateZoneNodes(cluster *infrav1.ProxmoxCluster) error {
+	// Zones sharing a credentialsRef share an endpoint; no credentialsRef
+	// means the cluster-level one.
+	endpointOf := func(zc infrav1.ZoneConfigSpec) string {
+		if zc.CredentialsRef == nil {
+			return ""
+		}
+		return zc.CredentialsRef.Namespace + "/" + zc.CredentialsRef.Name
+	}
+
+	type placement struct {
+		zone  string
+		index int
+	}
+	seen := make(map[string]placement)
+
+	for i, zc := range cluster.Spec.ZoneConfigs {
+		zoneName := ptr.Deref(zc.Zone, "")
+
+		if zc.CredentialsRef != nil && len(zc.Nodes) == 0 && len(cluster.Spec.AllowedNodes) > 0 {
+			return apierrors.NewInvalid(
+				cluster.GroupVersionKind().GroupKind(),
+				cluster.GetName(),
+				field.ErrorList{
+					field.Required(
+						field.NewPath("spec", "zoneConfig").Index(i).Child("nodes"),
+						"a zone with its own credentialsRef must list its nodes when spec.allowedNodes is set, otherwise its machines inherit that list, which names nodes of a different Proxmox cluster"),
+				})
+		}
+
+		endpoint := endpointOf(zc)
+		for _, node := range zc.Nodes {
+			key := endpoint + "\x00" + node
+			if prev, ok := seen[key]; ok {
+				return apierrors.NewInvalid(
+					cluster.GroupVersionKind().GroupKind(),
+					cluster.GetName(),
+					field.ErrorList{
+						field.Invalid(
+							field.NewPath("spec", "zoneConfig").Index(i).Child("nodes"),
+							node,
+							fmt.Sprintf("already belongs to zone %q, which is served by the same Proxmox endpoint; one host cannot be in two failure domains", prev.zone)),
+					})
+			}
+			seen[key] = placement{zone: zoneName, index: i}
 		}
 	}
 
