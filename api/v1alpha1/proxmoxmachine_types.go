@@ -372,7 +372,7 @@ type RoutingPolicySpec struct {
 	Table *uint32 `json:"table,omitempty"`
 
 	// Priority is the position in the ip rule FIB table.
-	// +kubebuilder:validation:Maximum=4294967295
+	// +kubebuilder:validation:Maximum=2147483647
 	// +kubebuilder:validation:XValidation:message="Cowardly refusing to insert FIB rule matching kernel rules",rule="(self > 0 && self < 32765) || (self > 32766)"
 	// +optional
 	Priority uint32 `json:"priority,omitempty"`
@@ -389,7 +389,7 @@ type VRFDevice struct {
 	Name string `json:"name"`
 
 	// Table is the ID of the routing table used for the l3mdev vrf device.
-	// +kubebuilder:validation:Maximum=4294967295
+	// +kubebuilder:validation:Maximum=2147483647
 	// +kubebuilder:validation:XValidation:message="Cowardly refusing to insert l3mdev rules into kernel tables",rule="(self > 0 && self < 254) || (self > 255)"
 	Table uint32 `json:"table"`
 

@@ -361,7 +361,7 @@ spec:
                                                   description: Priority is the position
                                                     in the ip rule FIB table.
                                                   format: int32
-                                                  maximum: 4294967295
+                                                  maximum: 2147483647
                                                   type: integer
                                                   x-kubernetes-validations:
                                                   - message: Cowardly refusing to
@@ -575,7 +575,7 @@ spec:
                                                   description: Priority is the position
                                                     in the ip rule FIB table.
                                                   format: int32
-                                                  maximum: 4294967295
+                                                  maximum: 2147483647
                                                   type: integer
                                                   x-kubernetes-validations:
                                                   - message: Cowardly refusing to
@@ -600,7 +600,7 @@ spec:
                                             description: Table is the ID of the routing
                                               table used for the l3mdev vrf device.
                                             format: int32
-                                            maximum: 4294967295
+                                            maximum: 2147483647
                                             type: integer
                                             x-kubernetes-validations:
                                             - message: Cowardly refusing to insert
