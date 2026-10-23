@@ -136,6 +136,47 @@ var _ = Describe("Controller Test", func() {
 		})
 	})
 
+	Context("zone scheduler hints", func() {
+		It("should accept per-zone scheduler hints", func() {
+			cluster := validProxmoxCluster("succeed-test-cluster-zone-hints")
+			cluster.Spec.SchedulerHints = &infrav1.SchedulerHints{
+				MemoryAdjustment: ptr.To(int64(100)),
+			}
+			cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
+				Zone:       ptr.To("zone-a"),
+				DNSServers: []string{"8.8.8.8"},
+				SchedulerHints: &infrav1.SchedulerHints{
+					MemoryAdjustment: ptr.To(int64(250)),
+					CPUAdjustment:    ptr.To(int64(300)),
+					MemoryTolerance:  ptr.To(int64(0)),
+					CPUTolerance:     ptr.To(int64(50)),
+				},
+			}}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &cluster)).To(Succeed())
+		})
+
+		It("should reject a tolerance above 100", func() {
+			// Only the real CRD schema enforces this; a Go test cannot.
+			cluster := validProxmoxCluster("test-cluster-zone-hints-tolerance")
+			cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
+				Zone:           ptr.To("zone-a"),
+				DNSServers:     []string{"8.8.8.8"},
+				SchedulerHints: &infrav1.SchedulerHints{CPUTolerance: ptr.To(int64(101))},
+			}}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &cluster)).To(MatchError(ContainSubstring("cpuTolerance")))
+		})
+
+		It("should reject a negative adjustment", func() {
+			cluster := validProxmoxCluster("test-cluster-zone-hints-adjustment")
+			cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
+				Zone:           ptr.To("zone-a"),
+				DNSServers:     []string{"8.8.8.8"},
+				SchedulerHints: &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(-1))},
+			}}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &cluster)).To(MatchError(ContainSubstring("cpuAdjustment")))
+		})
+	})
+
 	Context("update proxmox cluster", func() {
 		It("should disallow new endpoint IP to intersect with node IPs", func() {
 			clusterName := "test-cluster"

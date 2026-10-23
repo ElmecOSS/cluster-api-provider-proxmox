@@ -70,6 +70,15 @@ spec:
       templateSource:
         sourceNode: "${DC2_PROXMOX_SOURCENODE}"
         templateID: ${DC2_TEMPLATE_VMID}
+      # Optional: when this zone runs hosts of a different size, give it its
+      # own scheduling parameters. The override is total, so list every field
+      # the zone needs — unset ones fall back to the built-in defaults, not to
+      # the cluster values.
+      # schedulerHints:
+      #   memoryAdjustment: 100
+      #   cpuAdjustment: 300
+      #   memoryTolerance: 0
+      #   cpuTolerance: 50
   credentialsRef:
     name: "${CLUSTER_NAME}-proxmox-credentials"
 ---

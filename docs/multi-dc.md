@@ -9,7 +9,7 @@ behaves exactly like the single-endpoint upstream.
 
 ## How it works
 
-`ZoneConfigSpec` gains two optional fields:
+`ZoneConfigSpec` gains several optional fields:
 
 ```yaml
 spec:
@@ -36,6 +36,11 @@ spec:
       templateSource:                # templates cannot be cloned across
         sourceNode: dc2-pve1         # Proxmox clusters: every remote zone
         templateID: 100              # needs its own template source
+      schedulerHints:                # optional: this DC runs bigger hosts
+        memoryAdjustment: 100
+        cpuAdjustment: 300
+        memoryTolerance: 0
+        cpuTolerance: 50
 ```
 
 - **`credentialsRef`** — the Proxmox API credentials for the cluster backing
@@ -47,6 +52,14 @@ spec:
   `sourceNode`/`templateID`/`templateSelector` for machines placed in this
   zone (never merged). With `templateSelector` instead, tags are resolved on
   the zone's endpoint, so identically-tagged templates per DC also work.
+- **`schedulerHints`** — total override of the cluster-level scheduling
+  parameters for machines placed in this zone (never merged, like
+  `templateSource`). Zones usually sit on hardware of different sizes, and a
+  single cluster-wide `cpuAdjustment` cannot describe both. A zone that
+  overrides only part of the hints loses the cluster values for the rest and
+  falls back to the built-in defaults; the admission webhook warns when that
+  happens. See [advanced-setups.md](advanced-setups.md) for what each knob
+  does.
 - **`dnsServers`** — now actually honored: machines in the zone get the
   zone's resolvers, falling back to the cluster-level `dnsServers`.
 
