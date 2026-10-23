@@ -54,7 +54,31 @@ func ScheduleVM(ctx context.Context, machineScope *scope.MachineScope) (string, 
 		locations = machineScope.InfraCluster.ProxmoxCluster.Status.NodeLocations.ControlPlane
 	}
 
+	locations = locationsInZone(locations, machineScope.Zone())
+
 	return selectNode(ctx, client, machineScope.ProxmoxMachine, locations, machineScope.AllowedNodes(), schedulerHints)
+}
+
+// locationsInZone keeps only the placements that belong to the given zone.
+//
+// Node names are only unique within a single Proxmox cluster, and a zone may be
+// backed by its own one. Counting placements by node name alone would therefore
+// merge the tallies of same-named nodes living in different zones and skew the
+// spread in both.
+//
+// Entries recorded before zones existed carry no zone and are kept for the
+// default zone only, which is where those machines were placed.
+func locationsInZone(locations []infrav1.NodeLocation, zone infrav1.Zone) []infrav1.NodeLocation {
+	want := ptr.Deref(zone, "")
+
+	inZone := make([]infrav1.NodeLocation, 0, len(locations))
+	for _, loc := range locations {
+		if ptr.Deref(loc.Zone, "") == want {
+			inZone = append(inZone, loc)
+		}
+	}
+
+	return inZone
 }
 
 func selectNode(

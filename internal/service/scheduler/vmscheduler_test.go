@@ -311,6 +311,77 @@ func TestScheduleVMWithFailureDomainNodes(t *testing.T) {
 	require.Equal(t, "pve3", node)
 }
 
+func TestScheduleVMIgnoresPlacementsFromOtherZones(t *testing.T) {
+	ctrlClient := setupClient()
+
+	// Two zones backed by different Proxmox clusters that happen to use the
+	// same node names. Placements recorded for zone-b must not be counted
+	// against the same-named node of zone-a.
+	proxmoxCluster := infrav1.ProxmoxCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "bar"},
+		Spec: infrav1.ProxmoxClusterSpec{
+			AllowedNodes: []string{"pve1", "pve2"},
+			ZoneConfigs: []infrav1.ZoneConfigSpec{
+				{Zone: new("zone-a"), Nodes: []string{"pve1", "pve2"}},
+				{Zone: new("zone-b"), Nodes: []string{"pve1", "pve2"}},
+			},
+		},
+		Status: infrav1.ProxmoxClusterStatus{
+			NodeLocations: &infrav1.NodeLocations{
+				Workers: []infrav1.NodeLocation{
+					{Machine: corev1.LocalObjectReference{Name: "a1"}, Node: "pve2", Zone: new("zone-a")},
+					{Machine: corev1.LocalObjectReference{Name: "b1"}, Node: "pve1", Zone: new("zone-b")},
+					{Machine: corev1.LocalObjectReference{Name: "b2"}, Node: "pve1", Zone: new("zone-b")},
+					{Machine: corev1.LocalObjectReference{Name: "b3"}, Node: "pve1", Zone: new("zone-b")},
+				},
+			},
+		},
+	}
+	require.NoError(t, ctrlClient.Create(context.Background(), &proxmoxCluster))
+
+	proxmoxMachine := &infrav1.ProxmoxMachine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "foo-machine",
+			Labels: map[string]string{"cluster.x-k8s.io/cluster-name": "bar"},
+		},
+		Spec: infrav1.ProxmoxMachineSpec{
+			MemoryMiB: new(int32(10)),
+		},
+	}
+
+	fakeProxmoxClient := proxmoxtest.NewMockClient(t)
+	cluster := &clusterv1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "bar", Namespace: "default"},
+	}
+	machineScope, err := scope.NewMachineScope(scope.MachineScopeParams{
+		Client: ctrlClient,
+		Machine: &clusterv1.Machine{
+			ObjectMeta: metav1.ObjectMeta{Name: "foo-machine", Namespace: "default"},
+			Spec:       clusterv1.MachineSpec{FailureDomain: "zone-a"},
+		},
+		Cluster: cluster,
+		InfraCluster: &scope.ClusterScope{
+			Cluster:        cluster,
+			ProxmoxCluster: &proxmoxCluster,
+			ProxmoxClient:  fakeProxmoxClient,
+		},
+		ProxmoxMachine: proxmoxMachine,
+		IPAMHelper:     &ipam.Helper{},
+	})
+	require.NoError(t, err)
+	require.NoError(t, machineScope.FailureDomainError())
+
+	fakeProxmoxClient.EXPECT().GetReservableMemoryBytes(context.Background(), "pve1", int64(100)).Return(miBytes(60), nil)
+	fakeProxmoxClient.EXPECT().GetReservableMemoryBytes(context.Background(), "pve2", int64(100)).Return(miBytes(50), nil)
+
+	// Within zone-a, pve1 holds no machines and pve2 holds one, so pve1 wins.
+	// Counting the three zone-b placements on pve1 would flip the decision to
+	// pve2 even though that node is the busier one in this zone.
+	node, err := ScheduleVM(context.Background(), machineScope)
+	require.NoError(t, err)
+	require.Equal(t, "pve1", node)
+}
+
 func TestInsufficientMemoryError_Error(t *testing.T) {
 	err := InsufficientMemoryError{
 		node:      "pve1",
