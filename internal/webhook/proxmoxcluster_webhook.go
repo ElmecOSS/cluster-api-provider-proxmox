@@ -90,6 +90,8 @@ func (*ProxmoxCluster) ValidateCreate(_ context.Context, obj runtime.Object) (wa
 		return warnings, err
 	}
 
+	warnings = append(warnings, zoneSchedulerHintsWarnings(cluster)...)
+
 	return warnings, nil
 }
 
@@ -126,6 +128,7 @@ func (*ProxmoxCluster) ValidateUpdate(_ context.Context, oldObj runtime.Object, 
 	}
 
 	warnings = append(warnings, zoneCredentialsWarnings(newCluster)...)
+	warnings = append(warnings, zoneSchedulerHintsWarnings(newCluster)...)
 
 	return warnings, nil
 }
@@ -249,6 +252,49 @@ func zoneCredentialsWarnings(cluster *infrav1.ProxmoxCluster) admission.Warnings
 				"spec.zoneConfig[%d].credentialsRef points to namespace %q, different from the ProxmoxCluster namespace: the ownerReference set on the secret is cross-namespace, which Kubernetes GC may treat as an absent owner", i, zc.CredentialsRef.Namespace))
 		}
 	}
+	return warnings
+}
+
+// zoneSchedulerHintsWarnings warns when a zone overrides the scheduler hints
+// only in part. The override is total, so the fields the zone leaves unset do
+// not inherit the cluster values: they fall back to the built-in defaults.
+// Spelling out every field the zone needs is the only way to say what was
+// probably meant.
+func zoneSchedulerHintsWarnings(cluster *infrav1.ProxmoxCluster) admission.Warnings {
+	clusterHints := cluster.Spec.SchedulerHints
+	if clusterHints == nil {
+		return nil
+	}
+
+	var warnings admission.Warnings
+	for i, zc := range cluster.Spec.ZoneConfigs {
+		if zc.SchedulerHints == nil {
+			continue
+		}
+
+		var dropped []string
+		for _, f := range []struct {
+			name      string
+			zone      *int64
+			inherited *int64
+		}{
+			{"memoryAdjustment", zc.SchedulerHints.MemoryAdjustment, clusterHints.MemoryAdjustment},
+			{"cpuAdjustment", zc.SchedulerHints.CPUAdjustment, clusterHints.CPUAdjustment},
+			{"memoryTolerance", zc.SchedulerHints.MemoryTolerance, clusterHints.MemoryTolerance},
+			{"cpuTolerance", zc.SchedulerHints.CPUTolerance, clusterHints.CPUTolerance},
+		} {
+			if f.zone == nil && f.inherited != nil {
+				dropped = append(dropped, f.name)
+			}
+		}
+
+		if len(dropped) > 0 {
+			warnings = append(warnings, fmt.Sprintf(
+				"spec.zoneConfig[%d].schedulerHints overrides the cluster hints as a whole, so %s fall back to the built-in defaults rather than the cluster values; set them on the zone to keep them",
+				i, strings.Join(dropped, ", ")))
+		}
+	}
+
 	return warnings
 }
 

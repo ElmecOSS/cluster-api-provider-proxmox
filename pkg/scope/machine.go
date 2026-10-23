@@ -89,6 +89,11 @@ type MachineScope struct {
 	// otherwise the machine's own template fields. Overrides are total,
 	// never merged.
 	templateSource infrav1.TemplateSource
+
+	// schedulerHints are the effective scheduler hints, resolved once at
+	// scope construction: the zone's override when set, otherwise the
+	// cluster-level hints. Overrides are total, never merged.
+	schedulerHints *infrav1.SchedulerHints
 }
 
 // NewMachineScope creates a new MachineScope from the supplied parameters.
@@ -135,6 +140,7 @@ func NewMachineScope(params MachineScopeParams) (*MachineScope, error) {
 	m.failureDomainErr = m.resolvePlacement()
 	m.proxmoxClient, m.clientErr = m.InfraCluster.ClientForZone(context.TODO(), m.zone)
 	m.templateSource = m.resolveTemplateSource()
+	m.schedulerHints = m.resolveSchedulerHints()
 	return m, nil
 }
 
@@ -262,6 +268,33 @@ func (m *MachineScope) resolveTemplateSource() infrav1.TemplateSource {
 	}
 
 	return m.ProxmoxMachine.Spec.TemplateSource
+}
+
+// resolveSchedulerHints resolves the scheduler hints that apply to this
+// machine: the zone's override when it defines one, otherwise the
+// cluster-level hints.
+//
+// The override is total, like templateSource. A zone that sets a single field
+// therefore does not inherit the cluster's other values; the nil-safe getters
+// on SchedulerHints supply the built-in defaults instead.
+func (m *MachineScope) resolveSchedulerHints() *infrav1.SchedulerHints {
+	zoneName := ptr.Deref(m.zone, "")
+	if zoneName != "" {
+		for _, zc := range m.InfraCluster.ProxmoxCluster.Spec.ZoneConfigs {
+			if ptr.Deref(zc.Zone, "") == zoneName && zc.SchedulerHints != nil {
+				return zc.SchedulerHints
+			}
+		}
+	}
+
+	return m.InfraCluster.ProxmoxCluster.Spec.SchedulerHints
+}
+
+// SchedulerHints returns the scheduler hints in force for this machine,
+// resolved once at scope construction. A nil result is valid and means the
+// built-in defaults: every getter on SchedulerHints is nil-safe.
+func (m *MachineScope) SchedulerHints() *infrav1.SchedulerHints {
+	return m.schedulerHints
 }
 
 // SourceNode returns the effective Proxmox node to clone this machine from.

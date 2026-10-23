@@ -762,6 +762,71 @@ func TestSelectNodeCPUQueryError(t *testing.T) {
 	require.Empty(t, node)
 }
 
+func TestScheduleVMUsesZoneSchedulerHints(t *testing.T) {
+	ctrlClient := setupClient()
+
+	// The cluster allows 100% of memory, the zone 250%. Zones often sit on
+	// hosts of a different size, and one cluster-wide number cannot describe
+	// both.
+	proxmoxCluster := infrav1.ProxmoxCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "bar"},
+		Spec: infrav1.ProxmoxClusterSpec{
+			AllowedNodes:   []string{"pve1"},
+			SchedulerHints: &infrav1.SchedulerHints{MemoryAdjustment: ptr.To(int64(100))},
+			ZoneConfigs: []infrav1.ZoneConfigSpec{
+				{
+					Zone:           ptr.To("zone-a"),
+					Nodes:          []string{"pve3"},
+					SchedulerHints: &infrav1.SchedulerHints{MemoryAdjustment: ptr.To(int64(250))},
+				},
+			},
+		},
+		Status: infrav1.ProxmoxClusterStatus{
+			NodeLocations: &infrav1.NodeLocations{Workers: []infrav1.NodeLocation{}},
+		},
+	}
+	require.NoError(t, ctrlClient.Create(context.Background(), &proxmoxCluster))
+
+	proxmoxMachine := &infrav1.ProxmoxMachine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "foo-machine",
+			Labels: map[string]string{"cluster.x-k8s.io/cluster-name": "bar"},
+		},
+		Spec: infrav1.ProxmoxMachineSpec{MemoryMiB: ptr.To(int32(10))},
+	}
+
+	fakeProxmoxClient := proxmoxtest.NewMockClient(t)
+	cluster := &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "bar", Namespace: "default"}}
+	machineScope, err := scope.NewMachineScope(scope.MachineScopeParams{
+		Client: ctrlClient,
+		Machine: &clusterv1.Machine{
+			ObjectMeta: metav1.ObjectMeta{Name: "foo-machine", Namespace: "default"},
+			Spec:       clusterv1.MachineSpec{FailureDomain: "zone-a"},
+		},
+		Cluster: cluster,
+		InfraCluster: &scope.ClusterScope{
+			Cluster:        cluster,
+			ProxmoxCluster: &proxmoxCluster,
+			ProxmoxClient:  fakeProxmoxClient,
+		},
+		ProxmoxMachine: proxmoxMachine,
+		IPAMHelper:     &ipam.Helper{},
+	})
+	require.NoError(t, err)
+	require.NoError(t, machineScope.FailureDomainError())
+
+	// The adjustment reaches Proxmox as an argument, so the expectation is
+	// the assertion: without the override the client is called with 100 and
+	// the mock fails on an unexpected call.
+	fakeProxmoxClient.EXPECT().
+		GetReservableMemoryBytes(context.Background(), "pve3", int64(250)).
+		Return(miBytes(60), miBytes(100), nil)
+
+	node, err := ScheduleVM(context.Background(), machineScope)
+	require.NoError(t, err)
+	require.Equal(t, "pve3", node)
+}
+
 func TestToleranceScoringNormalisesAcrossAdjustments(t *testing.T) {
 	// Memory and CPU almost always run at different adjustments. Each
 	// resource score is normalised against a completely empty node, so equal

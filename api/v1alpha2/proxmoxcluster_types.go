@@ -184,6 +184,19 @@ type ZoneConfigSpec struct {
 	// +optional
 	// +structType=atomic
 	TemplateSource *TemplateSource `json:"templateSource,omitempty,omitzero"`
+
+	// schedulerHints overrides the cluster-level scheduler hints for machines
+	// placed in this zone. Zones are often backed by hosts with different core
+	// counts or memory, and a single cluster-wide adjustment cannot describe
+	// both.
+	//
+	// The override is total: zone and cluster hints are never merged, matching
+	// how templateSource behaves. A zone that sets only one field therefore
+	// loses the cluster values for the others and falls back to the built-in
+	// defaults, so spell out every field the zone needs.
+	// +optional
+	// +structType=atomic
+	SchedulerHints *SchedulerHints `json:"schedulerHints,omitempty,omitzero"`
 }
 
 // IPConfigSpec contains information about available IP config.
