@@ -148,6 +148,18 @@ func (err FailureDomainNotFoundError) Error() string {
 	return fmt.Sprintf("failure domain %q not configured in ProxmoxCluster zones", err.FailureDomain)
 }
 
+// ZoneNodesMissingError is returned when a zone backed by its own Proxmox
+// endpoint does not list the nodes that belong to it, while an allowed-node
+// list is in force. Machines placed there would otherwise be scheduled onto
+// hosts of a different Proxmox cluster.
+type ZoneNodesMissingError struct {
+	Zone string
+}
+
+func (err ZoneNodesMissingError) Error() string {
+	return fmt.Sprintf("zone %q has its own credentialsRef but lists no nodes; set spec.zoneConfig[].nodes so machines are placed on that Proxmox cluster", err.Zone)
+}
+
 // resolvePlacement resolves the machine's placement inputs once, at scope
 // construction. The precedence chains are:
 //
@@ -178,12 +190,25 @@ func (m *MachineScope) resolvePlacement() error {
 		return nil
 	}
 
-	// The zone may exist without an explicit node list; only a missing zone
-	// is an error.
+	// The zone may exist without an explicit node list. With no nodes to
+	// inherit the machine simply lands on its template's node, which is on
+	// the zone endpoint, and the scheduler never runs — that is sound.
+	//
+	// What is not sound is inheriting a node list resolved above while the
+	// zone is served by its own Proxmox cluster: those names either do not
+	// exist there or, worse, name different hosts.
+	//
+	// The webhook rejects the cluster-level case on create and update; this
+	// guard also covers a list coming from the ProxmoxMachine, which the
+	// cluster webhook cannot see.
 	for _, zc := range m.InfraCluster.ProxmoxCluster.Spec.ZoneConfigs {
-		if ptr.Deref(zc.Zone, "") == faildom {
-			return nil
+		if ptr.Deref(zc.Zone, "") != faildom {
+			continue
 		}
+		if zc.CredentialsRef != nil && len(m.allowedNodes) > 0 {
+			return ZoneNodesMissingError{Zone: faildom}
+		}
+		return nil
 	}
 
 	return FailureDomainNotFoundError{FailureDomain: faildom}
