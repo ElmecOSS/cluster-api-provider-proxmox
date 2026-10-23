@@ -207,11 +207,18 @@ func (m *MachineScope) resolvePlacement() error {
 	// The webhook rejects the cluster-level case on create and update; this
 	// guard also covers a list coming from the ProxmoxMachine, which the
 	// cluster webhook cannot see.
+	//
+	// Only a machine still waiting for its VM is held back. Placement is
+	// resolved once, in createVM, and never consulted again: a machine that
+	// already carries a vmid will not be scheduled anywhere, so failing its
+	// reconcile would protect nothing while flagging a healthy machine as
+	// not provisioned — which in a cluster with health checking is enough to
+	// have it replaced.
 	for _, zc := range m.InfraCluster.ProxmoxCluster.Spec.ZoneConfigs {
 		if ptr.Deref(zc.Zone, "") != faildom {
 			continue
 		}
-		if zc.CredentialsRef != nil && len(m.allowedNodes) > 0 {
+		if zc.CredentialsRef != nil && len(m.allowedNodes) > 0 && m.ProxmoxMachine.Spec.VirtualMachineID == nil {
 			return ZoneNodesMissingError{Zone: faildom}
 		}
 		return nil
