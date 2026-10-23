@@ -222,6 +222,35 @@ spec:
 
 When `cpuAdjustment` is enabled, CPU and memory are **hard-fit constraints**: if no node can fit the requested VM (computed from `numSockets × numCores` and `memoryMiB` on the `ProxmoxMachine`), provisioning fails with `InsufficientCPUError` or `InsufficientMemoryError` respectively.
 
+Two details worth knowing when reading the numbers:
+
+- **Capacity is logical CPUs**, that is sockets × cores × threads as Proxmox reports them in `cpuinfo.cpus`. The adjustment truncates: 64 cores at `95` allocate 60, not 60.8.
+- **Stopped guests still reserve.** Usage sums the configured vCPUs of every guest on the node, containers included and powered-off machines too; only templates are skipped. A reservation is about the right to start, which a stopped machine keeps, so counting only what runs would hand out the same cores twice. Memory has always worked this way.
+
+#### Per-zone scheduler hints
+
+On a cluster spanning several datacenters the zones often sit on different hardware, and a single cluster-wide adjustment cannot describe both. Any zone may therefore carry its own `schedulerHints`:
+
+```yaml
+spec:
+  schedulerHints:
+    memoryAdjustment: 100
+    cpuAdjustment: 200
+  zoneConfig:
+    - zone: dc1
+      # inherits the cluster hints above
+      dnsServers: [8.8.8.8]
+    - zone: dc2
+      dnsServers: [8.8.8.8]
+      schedulerHints:
+        memoryAdjustment: 100
+        cpuAdjustment: 300    # newer hosts, more cores to spread over
+        memoryTolerance: 0
+        cpuTolerance: 50
+```
+
+**The override is total**: zone and cluster hints are never merged, exactly as for `templateSource`. A zone that sets only `cpuAdjustment` does **not** keep the cluster's `memoryAdjustment` — it falls back to the built-in default. Spell out every field the zone needs; the admission webhook warns when a partial override drops a value the cluster had set.
+
 ## Template lookup based on Proxmox tags
 
 Our provider is able to look up templates based on their attached tags, for `ProxmoxMachine` resources, that make use of a tag selector.
