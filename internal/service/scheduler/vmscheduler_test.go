@@ -1041,3 +1041,53 @@ func TestPendingBreaksTieWhenNothingElseDoes(t *testing.T) {
 func TestBuildInsufficientErrorOnEmptyNodeList(t *testing.T) {
 	require.ErrorContains(t, buildInsufficientError(nil, miBytes(8), 2), "allowed node list is empty")
 }
+
+// TestOversizedCPURequestDoesNotWrap covers an int32 product that overflows.
+// numSockets and numCores carry no upper bound, and 65536 x 65536 is exactly
+// 2^32: as an int32 the request reads 0, slips past the hard-fit check and
+// schedules a VM Proxmox cannot possibly start.
+func TestOversizedCPURequestDoesNotWrap(t *testing.T) {
+	cl := fakeResourceClient{
+		memory:      map[string]uint64{"pve1": giBytes(100)},
+		memoryTotal: map[string]uint64{"pve1": giBytes(100)},
+		cpus:        map[string]int{"pve1": 64},
+		cpusTotal:   map[string]int{"pve1": 64},
+	}
+	machine := &infrav1.ProxmoxMachine{
+		Spec: infrav1.ProxmoxMachineSpec{
+			MemoryMiB:  ptr.To(int32(2048)),
+			NumSockets: ptr.To(int32(65536)),
+			NumCores:   ptr.To(int32(65536)),
+		},
+	}
+
+	node, err := selectNode(context.Background(), cl, machine, nil,
+		[]string{"pve1"}, &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))})
+
+	require.ErrorAs(t, err, &InsufficientCPUError{})
+	require.Empty(t, node)
+}
+
+// TestNegativeCPURequestDoesNotInflateScore is the other side of the wrap:
+// 50000 x 50000 reads negative as an int32, which would subtract from the
+// node's usage and lift its score above the 1.0 the curve is bounded by.
+func TestNegativeCPURequestDoesNotInflateScore(t *testing.T) {
+	cl := fakeResourceClient{
+		memory:      map[string]uint64{"pve1": giBytes(100)},
+		memoryTotal: map[string]uint64{"pve1": giBytes(100)},
+		cpus:        map[string]int{"pve1": 64},
+		cpusTotal:   map[string]int{"pve1": 64},
+	}
+	machine := &infrav1.ProxmoxMachine{
+		Spec: infrav1.ProxmoxMachineSpec{
+			MemoryMiB:  ptr.To(int32(2048)),
+			NumSockets: ptr.To(int32(50000)),
+			NumCores:   ptr.To(int32(50000)),
+		},
+	}
+
+	_, err := selectNode(context.Background(), cl, machine, nil,
+		[]string{"pve1"}, &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))})
+
+	require.ErrorAs(t, err, &InsufficientCPUError{})
+}

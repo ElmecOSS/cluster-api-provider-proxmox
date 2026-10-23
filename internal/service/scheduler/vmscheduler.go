@@ -161,7 +161,12 @@ func selectNode(
 	}
 
 	requestedMemory := uint64(ptr.Deref(machine.Spec.MemoryMiB, 0)) * 1024 * 1024 // convert to bytes
-	requestedCPUs := ptr.Deref(machine.Spec.NumSockets, 0) * ptr.Deref(machine.Spec.NumCores, 0)
+	// Widen before multiplying: both fields are int32 with no upper bound, and
+	// an int32 product wraps. 65536 sockets x 65536 cores lands on exactly 0
+	// and 50000 x 50000 on a negative, either of which walks straight past the
+	// hard-fit check below — and a negative request then subtracts from the
+	// node's usage, pushing its score above 1 so it wins every time.
+	requestedCPUs := int64(ptr.Deref(machine.Spec.NumSockets, 0)) * int64(ptr.Deref(machine.Spec.NumCores, 0))
 
 	memoryTolerance := schedulerHints.GetMemoryTolerance()
 	cpuTolerance := schedulerHints.GetCPUTolerance()
@@ -191,7 +196,7 @@ func selectNode(
 		if requestedMemory > n.AvailableMemory {
 			continue
 		}
-		if cpuEnabled && requestedCPUs > int32(n.AvailableCPUs) {
+		if cpuEnabled && requestedCPUs > int64(n.AvailableCPUs) {
 			continue
 		}
 
@@ -376,7 +381,7 @@ func resourceScore(phys, alloc, used float64) float64 {
 // buildInsufficientError returns the best-fitting error when no candidate fits
 // the request: InsufficientMemoryError if no node has enough memory available,
 // otherwise InsufficientCPUError pointing at the node with the largest CPU headroom.
-func buildInsufficientError(nodes []nodeInfo, requestedMemory uint64, requestedCPUs int32) error {
+func buildInsufficientError(nodes []nodeInfo, requestedMemory uint64, requestedCPUs int64) error {
 	// Callers gate on a non-empty allowed-node list, so this is unreachable
 	// today; indexing into the empty slice below would panic if that ever
 	// stopped holding.
