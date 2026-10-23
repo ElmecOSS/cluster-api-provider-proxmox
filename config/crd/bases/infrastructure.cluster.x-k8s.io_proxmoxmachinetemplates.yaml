@@ -1014,9 +1014,13 @@ spec:
                                         minimum: 0
                                         type: integer
                                       table:
-                                        description: table is the routing table used
-                                          for this route.
+                                        description: |-
+                                          table is the routing table used for this route.
+                                          A routing table ID is never negative; the renderers write it straight
+                                          into the guest's network configuration, where a negative value is
+                                          refused and the machine comes up without networking.
                                         format: int32
+                                        minimum: 0
                                         type: integer
                                       to:
                                         description: to is the subnet to be routed.
@@ -1057,8 +1061,13 @@ spec:
                                           rule: (self > 0 && self < 32765) || (self
                                             > 32766)
                                       table:
-                                        description: table is the routing table ID.
+                                        description: |-
+                                          table is the routing table ID.
+                                          A routing table ID is never negative; the renderers write it straight
+                                          into the guest's network configuration, where a negative value is
+                                          refused and the machine comes up without networking.
                                         format: int32
+                                        minimum: 0
                                         type: integer
                                       to:
                                         description: to is the subnet of the target.
@@ -1121,9 +1130,13 @@ spec:
                                         minimum: 0
                                         type: integer
                                       table:
-                                        description: table is the routing table used
-                                          for this route.
+                                        description: |-
+                                          table is the routing table used for this route.
+                                          A routing table ID is never negative; the renderers write it straight
+                                          into the guest's network configuration, where a negative value is
+                                          refused and the machine comes up without networking.
                                         format: int32
+                                        minimum: 0
                                         type: integer
                                       to:
                                         description: to is the subnet to be routed.
@@ -1164,8 +1177,13 @@ spec:
                                           rule: (self > 0 && self < 32765) || (self
                                             > 32766)
                                       table:
-                                        description: table is the routing table ID.
+                                        description: |-
+                                          table is the routing table ID.
+                                          A routing table ID is never negative; the renderers write it straight
+                                          into the guest's network configuration, where a negative value is
+                                          refused and the machine comes up without networking.
                                         format: int32
+                                        minimum: 0
                                         type: integer
                                       to:
                                         description: to is the subnet of the target.
