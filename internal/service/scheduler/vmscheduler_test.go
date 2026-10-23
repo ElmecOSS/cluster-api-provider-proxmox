@@ -762,6 +762,77 @@ func TestSelectNodeCPUQueryError(t *testing.T) {
 	require.Empty(t, node)
 }
 
+func TestToleranceScoringNormalisesAcrossAdjustments(t *testing.T) {
+	// Memory and CPU almost always run at different adjustments. Each
+	// resource score is normalised against a completely empty node, so equal
+	// tolerances mean equal influence whatever those adjustments are.
+	//
+	// Without the normalisation the maximum score is
+	// (1 + overbookDiscount*(alloc/phys - 1))^2: 1.0 at 100% but 4.0 at 300%.
+	// CPU would then carry four times its intended weight, and pve2 would win
+	// on a CPU edge that is smaller, in relative terms, than pve1's lead on
+	// memory.
+	allowedNodes := []string{"pve1", "pve2"}
+
+	proxmoxMachine := &infrav1.ProxmoxMachine{
+		Spec: infrav1.ProxmoxMachineSpec{
+			MemoryMiB:  ptr.To(int32(8)),
+			NumSockets: ptr.To(int32(1)),
+			NumCores:   ptr.To(int32(4)),
+		},
+	}
+
+	cl := fakeResourceClient{
+		memory:      map[string]uint64{"pve1": miBytes(350), "pve2": miBytes(250)},
+		memoryTotal: map[string]uint64{"pve1": miBytes(400), "pve2": miBytes(400)},
+		cpus:        map[string]int{"pve1": 40, "pve2": 70},
+		cpusTotal:   map[string]int{"pve1": 96, "pve2": 96},
+	}
+
+	hints := &infrav1.SchedulerHints{
+		MemoryAdjustment: ptr.To(int64(100)),
+		CPUAdjustment:    ptr.To(int64(300)),
+		MemoryTolerance:  ptr.To(int64(50)),
+		CPUTolerance:     ptr.To(int64(50)),
+	}
+
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, hints)
+	require.NoError(t, err)
+	require.Equal(t, "pve1", node)
+}
+
+func TestScoringDoesNotChargeReflectedPlacementsTwice(t *testing.T) {
+	// A node that has hosted machines for a while has them in the usage
+	// Proxmox reports. Adding the placements we recorded on top would charge
+	// them a second time, and the overcharge grows with the node's history.
+	//
+	// pve1 holds ten long-settled machines and still has more free memory
+	// than pve2, which holds none. It must win. Counting its placements again
+	// would make the emptier-looking node win instead.
+	allowedNodes := []string{"pve1", "pve2"}
+
+	proxmoxMachine := &infrav1.ProxmoxMachine{
+		Spec: infrav1.ProxmoxMachineSpec{MemoryMiB: ptr.To(int32(8))},
+	}
+
+	cl := fakeResourceClient{
+		memory:      map[string]uint64{"pve1": miBytes(200), "pve2": miBytes(160)},
+		memoryTotal: map[string]uint64{"pve1": miBytes(400), "pve2": miBytes(400)},
+	}
+
+	locations := make([]infrav1.NodeLocation, 0, 10)
+	for i := range 10 {
+		locations = append(locations, infrav1.NodeLocation{
+			Machine: corev1.LocalObjectReference{Name: fmt.Sprintf("settled-%d", i)},
+			Node:    "pve1",
+		})
+	}
+
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
+	require.NoError(t, err)
+	require.Equal(t, "pve1", node)
+}
+
 func TestInsufficientMemoryError_Error(t *testing.T) {
 	err := InsufficientMemoryError{
 		node:      "pve1",
