@@ -194,20 +194,24 @@ func selectNode(
 		}
 
 		pending := pendingCount[n.Name]
-		pendingMem := uint64(pending) * requestedMemory
 
 		physMem := float64(n.AllocatableMemory)
 		if memoryAdjustment > 0 {
 			physMem = float64(n.AllocatableMemory) * 100.0 / float64(memoryAdjustment)
 		}
-		usedMem := float64(n.AllocatableMemory-n.AvailableMemory+pendingMem) + float64(requestedMemory)
+		usedMem := effectiveUsage(
+			float64(n.AllocatableMemory)-float64(n.AvailableMemory),
+			float64(pending)*float64(requestedMemory),
+		) + float64(requestedMemory)
 		scoreMem := resourceScore(physMem, float64(n.AllocatableMemory), usedMem)
 
 		var scoreCPU float64
 		if cpuEnabled {
-			pendingCPU := int32(pending) * requestedCPUs
 			physCPU := float64(n.AllocatableCPUs) * 100.0 / float64(cpuAdjustment)
-			usedCPU := float64(int32(n.AllocatableCPUs-n.AvailableCPUs)+pendingCPU) + float64(requestedCPUs)
+			usedCPU := effectiveUsage(
+				float64(n.AllocatableCPUs)-float64(n.AvailableCPUs),
+				float64(pending)*float64(requestedCPUs),
+			) + float64(requestedCPUs)
 			scoreCPU = resourceScore(physCPU, float64(n.AllocatableCPUs), usedCPU)
 		}
 
@@ -225,12 +229,27 @@ func selectNode(
 	}
 
 	sort.SliceStable(candidates, func(i, j int) bool {
-		// primary: curve-based score (higher wins); tie-break: raw memory
-		// headroom (kicks in when many nodes saturate under pending inflation).
+		// Primary: the curve-based score, higher wins.
 		if candidates[i].scoreTotal != candidates[j].scoreTotal {
 			return candidates[i].scoreTotal > candidates[j].scoreTotal
 		}
-		return candidates[i].AvailableMemory > candidates[j].AvailableMemory
+
+		// First tie-break: raw memory headroom. Scores tie most often when
+		// every candidate reads as saturated, and there the node with the
+		// most room left is the useful answer.
+		if candidates[i].AvailableMemory != candidates[j].AvailableMemory {
+			return candidates[i].AvailableMemory > candidates[j].AvailableMemory
+		}
+
+		// Last tie-break: fewer placements already recorded here.
+		//
+		// This is what spreads a rapid scale-up. Proxmox takes seconds to
+		// reflect a just-cloned VM, so a burst of machines reads identical
+		// usage on every node — same score, same headroom — and left at that
+		// they would all land on the same one. The placements we recorded
+		// ourselves are the only evidence available, and by this point they
+		// cost nothing in accuracy: everything else already ties.
+		return candidates[i].pending < candidates[j].pending
 	})
 
 	decision := candidates[0].Name
@@ -272,6 +291,27 @@ func selectNode(
 	return decision, nil
 }
 
+// effectiveUsage reconciles what Proxmox reports as used with what the
+// placements already recorded in status.NodeLocations imply.
+//
+// Proxmox takes seconds to reflect a just-cloned VM, so during a rapid
+// scale-up the reported usage lags and every machine would be scored against
+// a node that still looks empty — they would all land on the same one.
+// Adding the recorded placements on top of the reported usage fixes the
+// clumping but charges a machine twice once the API has caught up, and the
+// drift grows as a cluster fills.
+//
+// Taking the larger of the two keeps both properties: while the API lags the
+// placements dominate and drive the spread; once it catches up the reported
+// usage overtakes them and the score settles on the truth.
+func effectiveUsage(reported, fromPlacements float64) float64 {
+	if reported < 0 {
+		reported = 0
+	}
+
+	return math.Max(reported, fromPlacements)
+}
+
 // resourceScore returns the non-linear headroom score for a single resource.
 // A unit of free capacity in the physical range is worth 1 point; a unit in the
 // overcommit range is worth overbookDiscount points. The raw ratio is normalised
@@ -289,7 +329,20 @@ func resourceScore(phys, alloc, used float64) float64 {
 	if freeOver < 0 {
 		freeOver = 0
 	}
-	raw := (freePhys + overbookDiscount*freeOver) / phys
+
+	// Normalise against a completely empty node, so the result is always in
+	// [0, 1] whatever the adjustment. Without this the maximum score is
+	// 1 + overbookDiscount*(alloc/phys - 1), squared: 1.0 at 100% but 4.0 at
+	// 300%. Memory and CPU usually run at different adjustments, so summing
+	// their weighted scores would silently give the more overcommitted
+	// resource several times the intended weight.
+	maxFreeOver := alloc - phys
+	if maxFreeOver < 0 {
+		maxFreeOver = 0
+	}
+
+	raw := (freePhys + overbookDiscount*freeOver) / (phys + overbookDiscount*maxFreeOver)
+
 	return math.Pow(raw, saturationExponent)
 }
 
