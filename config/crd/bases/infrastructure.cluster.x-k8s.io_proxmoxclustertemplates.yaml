@@ -1273,6 +1273,59 @@ spec:
                                 type: string
                               type: array
                               x-kubernetes-list-type: set
+                            schedulerHints:
+                              description: |-
+                                schedulerHints overrides the cluster-level scheduler hints for machines
+                                placed in this zone. Zones are often backed by hosts with different core
+                                counts or memory, and a single cluster-wide adjustment cannot describe
+                                both.
+
+                                The override is total: zone and cluster hints are never merged, matching
+                                how templateSource behaves. A zone that sets only one field therefore
+                                loses the cluster values for the others and falls back to the built-in
+                                defaults, so spell out every field the zone needs.
+                              properties:
+                                cpuAdjustment:
+                                  description: |-
+                                    cpuAdjustment allows to adjust a node's CPU capacity by a given percentage.
+                                    For example, setting it to 300 allows allocating 300% of a host's CPU cores for VMs (3:1 overcommit),
+                                    and setting it to 95 limits CPU allocation to 95% of the physical core count.
+                                    Setting it to 0 entirely disables scheduling CPU constraints (default).
+                                    When set to a non-zero value, CPU becomes a hard-fit constraint and a scoring
+                                    dimension alongside memory; see memoryTolerance and cpuTolerance for tuning.
+                                  format: int64
+                                  minimum: 0
+                                  type: integer
+                                cpuTolerance:
+                                  description: |-
+                                    cpuTolerance expresses how acceptable it is to saturate CPU on a node,
+                                    in [0, 100]. Lower values make the scheduler more protective of CPU.
+                                    Only used when cpuAdjustment > 0. Defaults to 100.
+                                  format: int64
+                                  maximum: 100
+                                  minimum: 0
+                                  type: integer
+                                memoryAdjustment:
+                                  description: |-
+                                    memoryAdjustment allows to adjust a node's memory by a given percentage.
+                                    For example, setting it to 300 allows to allocate 300% of a host's memory for VMs,
+                                    and setting it to 95 limits memory allocation to 95% of a host's memory.
+                                    Setting it to 0 entirely disables scheduling memory constraints.
+                                    By default 100% of a node's memory will be used for allocation.
+                                  format: int64
+                                  minimum: 0
+                                  type: integer
+                                memoryTolerance:
+                                  description: |-
+                                    memoryTolerance expresses how acceptable it is to saturate memory on a node,
+                                    in [0, 100]. Lower values make the scheduler more protective of memory.
+                                    Only used when cpuAdjustment > 0. Defaults to 0.
+                                  format: int64
+                                  maximum: 100
+                                  minimum: 0
+                                  type: integer
+                              type: object
+                              x-kubernetes-map-type: atomic
                             templateSource:
                               description: |-
                                 templateSource overrides the machine template source for machines

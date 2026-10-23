@@ -125,6 +125,47 @@ func TestValidateZoneNodes(t *testing.T) {
 	})
 }
 
+func TestZoneSchedulerHintsWarnings(t *testing.T) {
+	withHints := func(clusterHints, zoneHints *infrav1.SchedulerHints) *infrav1.ProxmoxCluster {
+		cluster := validProxmoxCluster("zone-hints-cluster")
+		cluster.Spec.SchedulerHints = clusterHints
+		cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{
+			{Zone: ptr.To("zone-a"), DNSServers: []string{"8.8.8.8"}, SchedulerHints: zoneHints},
+		}
+		return &cluster
+	}
+
+	t.Run("a partial override silently drops the cluster values", func(t *testing.T) {
+		cluster := withHints(
+			&infrav1.SchedulerHints{
+				MemoryAdjustment: ptr.To(int64(120)),
+				CPUAdjustment:    ptr.To(int64(300)),
+			},
+			&infrav1.SchedulerHints{MemoryAdjustment: ptr.To(int64(250))},
+		)
+		warnings := zoneSchedulerHintsWarnings(cluster)
+		require.Len(t, warnings, 1)
+		require.Contains(t, warnings[0], "cpuAdjustment")
+		require.NotContains(t, warnings[0], "memoryAdjustment")
+	})
+
+	t.Run("a complete override warns about nothing", func(t *testing.T) {
+		hints := &infrav1.SchedulerHints{MemoryAdjustment: ptr.To(int64(120))}
+		zone := &infrav1.SchedulerHints{MemoryAdjustment: ptr.To(int64(250))}
+		require.Empty(t, zoneSchedulerHintsWarnings(withHints(hints, zone)))
+	})
+
+	t.Run("no zone override, nothing to warn about", func(t *testing.T) {
+		hints := &infrav1.SchedulerHints{MemoryAdjustment: ptr.To(int64(120))}
+		require.Empty(t, zoneSchedulerHintsWarnings(withHints(hints, nil)))
+	})
+
+	t.Run("no cluster hints, there is nothing to lose", func(t *testing.T) {
+		zone := &infrav1.SchedulerHints{MemoryAdjustment: ptr.To(int64(250))}
+		require.Empty(t, zoneSchedulerHintsWarnings(withHints(nil, zone)))
+	})
+}
+
 func TestValidateZoneRemoval_DeniesWithLiveMachines(t *testing.T) {
 	oldCluster := clusterWithZone("zone-a", &corev1.SecretReference{Name: "creds-a"})
 

@@ -71,7 +71,7 @@ func (err InsufficientCPUError) Error() string {
 // It requires the machine's ProxmoxCluster to have at least 1 allowed node.
 func ScheduleVM(ctx context.Context, machineScope *scope.MachineScope) (string, error) {
 	client := machineScope.ProxmoxClient()
-	schedulerHints := machineScope.InfraCluster.ProxmoxCluster.Spec.SchedulerHints
+	schedulerHints := machineScope.SchedulerHints()
 	locations := machineScope.InfraCluster.ProxmoxCluster.Status.NodeLocations.Workers
 	if util.IsControlPlaneMachine(machineScope.Machine) {
 		locations = machineScope.InfraCluster.ProxmoxCluster.Status.NodeLocations.ControlPlane
