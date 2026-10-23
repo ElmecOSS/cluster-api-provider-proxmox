@@ -333,6 +333,18 @@ func (c *APIClient) GetReservableMemoryBytes(ctx context.Context, nodeName strin
 
 // GetReservableCPUCores returns the number of CPU cores that can be reserved by a new VM,
 // along with the total allocatable cores (after applying cpuAdjustment).
+//
+// Capacity is the node's logical CPUs, that is sockets × cores × threads as
+// reported in cpuinfo.cpus, scaled by cpuAdjustment. The scaling truncates:
+// 64 cores at 95% allocate 60, not 60.8.
+//
+// Usage is the configured vCPUs of every guest on the node, containers
+// included. Templates are skipped; **stopped guests are not**. A reservation
+// is about the right to start, and a powered-off machine keeps that right, so
+// counting only what runs right now would hand out capacity twice. The same
+// reasoning already governs GetReservableMemoryBytes.
+//
+// An overbooked node reports no headroom rather than a negative one.
 func (c *APIClient) GetReservableCPUCores(ctx context.Context, nodeName string, cpuAdjustment int64) (int, int, error) {
 	node := (&proxmox.Node{}).New(c.Client, nodeName)
 

@@ -752,3 +752,140 @@ func TestProxmoxAPIClient_CloudInitStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestProxmoxAPIClient_GetReservableCPUCores(t *testing.T) {
+	// A guest as the /nodes/{node}/qemu and /lxc list endpoints return it.
+	// The structs cannot be used directly here: proxmox.VirtualMachine always
+	// decodes as a template when built in Go, so the JSON is spelled out.
+	guest := func(name string, cpus int, status string, template bool) map[string]any {
+		g := map[string]any{
+			"name": name, "cpus": cpus, "status": status, "vmid": 1000 + cpus,
+			"maxmem": 0, "mem": 0, "uptime": 0, "disk": 0, "cpu": 0,
+			"maxdisk": 0, "netin": 0, "netout": 0, "diskread": 0, "diskwrite": 0,
+		}
+		if template {
+			g["template"] = 1
+		}
+		return g
+	}
+
+	tests := []struct {
+		name              string
+		totalCPUs         int
+		cpuAdjustment     int64
+		vms               []any
+		containers        []any
+		expectAvailable   int
+		expectAllocatable int
+	}{
+		{
+			name:          "templates excluded, stopped guests still reserve",
+			totalCPUs:     32,
+			cpuAdjustment: 100,
+			vms: []any{
+				guest("running-worker", 4, "running", false),
+				guest("stopped-worker", 2, "stopped", false),
+				guest("golden-image", 8, "stopped", true),
+			},
+			expectAvailable:   26, // 32 - 4 - 2, the template is not charged
+			expectAllocatable: 32,
+		},
+		{
+			name:              "containers count too",
+			totalCPUs:         32,
+			cpuAdjustment:     100,
+			vms:               []any{guest("worker", 4, "running", false)},
+			containers:        []any{guest("ct", 2, "running", false)},
+			expectAvailable:   26,
+			expectAllocatable: 32,
+		},
+		{
+			name:              "overcommit widens what is allocatable",
+			totalCPUs:         32,
+			cpuAdjustment:     300,
+			vms:               []any{guest("worker", 6, "running", false)},
+			expectAvailable:   90, // 32*3 - 6
+			expectAllocatable: 96,
+		},
+		{
+			name:              "underprovisioning truncates, it does not round",
+			totalCPUs:         64,
+			cpuAdjustment:     95,
+			expectAvailable:   60, // 64*95/100 is 60.8
+			expectAllocatable: 60,
+		},
+		{
+			name:              "an overbooked node reports no headroom, never a negative one",
+			totalCPUs:         4,
+			cpuAdjustment:     100,
+			vms:               []any{guest("greedy", 10, "running", false)},
+			expectAvailable:   0,
+			expectAllocatable: 4,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := newTestClient(t)
+			httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/status`,
+				newJSONResponder(200, proxmox.Node{CPUInfo: proxmox.CPUInfo{CPUs: test.totalCPUs}, Name: "test"}))
+			httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/qemu`,
+				newJSONResponder(200, test.vms))
+			httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/lxc`,
+				newJSONResponder(200, test.containers))
+
+			available, allocatable, err := client.GetReservableCPUCores(context.Background(), "test", test.cpuAdjustment)
+			require.NoError(t, err)
+			require.Equal(t, test.expectAvailable, available, "available")
+			require.Equal(t, test.expectAllocatable, allocatable, "allocatable")
+		})
+	}
+
+	t.Run("disabled, the guest lists are never fetched", func(t *testing.T) {
+		// Only /status is registered: httpmock fails any other call, so a
+		// successful result proves the guests were not listed.
+		client := newTestClient(t)
+		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/status`,
+			newJSONResponder(200, proxmox.Node{CPUInfo: proxmox.CPUInfo{CPUs: 32}, Name: "test"}))
+
+		available, allocatable, err := client.GetReservableCPUCores(context.Background(), "test", 0)
+		require.NoError(t, err)
+		require.Equal(t, 3200, available)
+		require.Equal(t, 3200, allocatable)
+	})
+
+	t.Run("fail to access endpoint", func(t *testing.T) {
+		client := newTestClient(t)
+		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/status`,
+			newJSONResponder(401, "Forbidden"))
+
+		available, allocatable, err := client.GetReservableCPUCores(context.Background(), "test", 100)
+		require.EqualError(t, err, "cannot find node with name test: not authorized to access endpoint")
+		require.Zero(t, available)
+		require.Zero(t, allocatable)
+	})
+
+	t.Run("fail to list VMs", func(t *testing.T) {
+		client := newTestClient(t)
+		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/status`,
+			newJSONResponder(200, proxmox.Node{CPUInfo: proxmox.CPUInfo{CPUs: 32}, Name: "test"}))
+		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/qemu`,
+			newJSONResponder(401, nil))
+
+		_, _, err := client.GetReservableCPUCores(context.Background(), "test", 100)
+		require.ErrorContains(t, err, "cannot list vms for node test")
+	})
+
+	t.Run("fail to list containers", func(t *testing.T) {
+		client := newTestClient(t)
+		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/status`,
+			newJSONResponder(200, proxmox.Node{CPUInfo: proxmox.CPUInfo{CPUs: 32}, Name: "test"}))
+		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/qemu`,
+			newJSONResponder(200, []any{}))
+		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/lxc`,
+			newJSONResponder(401, nil))
+
+		_, _, err := client.GetReservableCPUCores(context.Background(), "test", 100)
+		require.ErrorContains(t, err, "cannot list containers for node test")
+	})
+}
