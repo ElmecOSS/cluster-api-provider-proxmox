@@ -18,6 +18,7 @@ package vmservice
 
 import (
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -664,4 +665,45 @@ func TestToFIBRuleData(t *testing.T) {
 			require.Equal(t, tc.expect, got)
 		})
 	}
+}
+
+// FuzzNetworkDeviceRoundTrip pins the pair that decides whether a VM's network
+// needs rewriting: formatNetworkDevice builds the string CAPMOX sends to
+// Proxmox, the extract helpers read back what Proxmox reports, and
+// shouldUpdateNetworkDevices compares the two. Any value that does not survive
+// the round trip reads as a difference that was never there, and the device is
+// rewritten on every single reconcile.
+func FuzzNetworkDeviceRoundTrip(f *testing.F) {
+	f.Add("virtio", "vmbr1", int32(1500), int32(100), int32(4))
+	f.Add("virtio", "vmbr-dmz", int32(9000), int32(0), int32(1))
+	f.Add("e1000", "vmbr0.100", int32(1280), int32(4094), int32(8))
+	f.Add("virtio", "br_lan", int32(1), int32(1), int32(1))
+
+	f.Fuzz(func(t *testing.T, model, bridge string, mtu, vlan, queues int32) {
+		// Only the shapes Proxmox and the CRDs can actually produce: a comma
+		// would end the field and an equals sign would start another key.
+		if model == "" || bridge == "" ||
+			strings.ContainsAny(model, ",=") || strings.ContainsAny(bridge, ",=") {
+			t.Skip()
+		}
+		if mtu < 0 || vlan < 0 || queues < 0 {
+			t.Skip()
+		}
+
+		device := formatNetworkDevice(model, bridge, &mtu, &vlan, &queues)
+
+		require.Equal(t, model, extractNetworkModel(device), "model lost in %q", device)
+		require.Equal(t, bridge, extractNetworkBridge(device), "bridge lost in %q", device)
+		require.Equal(t, mtu, extractNetworkMTU(device), "mtu lost in %q", device)
+		require.Equal(t, vlan, extractNetworkVLAN(device), "vlan lost in %q", device)
+		require.Equal(t, queues, extractNetworkQueue(device), "queues lost in %q", device)
+	})
+}
+
+// A key that merely ends in a known one must not be mistaken for it. qemu's
+// own host_mtu= is the realistic case; the same shape protects every helper.
+func TestExtractorsIgnoreLongerKeys(t *testing.T) {
+	device := "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr1,host_mtu=9000"
+	require.Equal(t, int32(0), extractNetworkMTU(device), "host_mtu is not mtu")
+	require.Equal(t, "vmbr1", extractNetworkBridge(device))
 }
