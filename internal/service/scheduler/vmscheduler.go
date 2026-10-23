@@ -20,6 +20,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -132,6 +133,7 @@ func selectNode(
 ) (string, error) {
 	memoryAdjustment := schedulerHints.GetMemoryAdjustment()
 	cpuAdjustment := schedulerHints.GetCPUAdjustment()
+	memEnabled := memoryAdjustment > 0
 	cpuEnabled := cpuAdjustment > 0
 
 	nodes := make([]nodeInfo, len(allowedNodes))
@@ -195,13 +197,20 @@ func selectNode(
 
 		pending := pendingCount[n.Name]
 
-		physMem := float64(n.AllocatableMemory)
-		if memoryAdjustment > 0 {
-			physMem = float64(n.AllocatableMemory) * 100.0 / float64(memoryAdjustment)
+		// With memoryAdjustment at 0 the client reports the node's whole
+		// memory as both allocatable and available, which is its way of
+		// saying "memory is not a constraint here". Scoring it anyway would
+		// hand the decision to node size — a 400GiB host would beat a 100GiB
+		// one at 0.990 to 0.960 on a resource the operator switched off — so
+		// memory is left out of the score entirely, exactly as CPU is when
+		// cpuAdjustment is 0.
+		var scoreMem float64
+		if memEnabled {
+			physMem := float64(n.AllocatableMemory) * 100.0 / float64(memoryAdjustment)
+			usedMem := reportedUsage(float64(n.AllocatableMemory)-float64(n.AvailableMemory)) +
+				float64(pending)*float64(requestedMemory) + float64(requestedMemory)
+			scoreMem = resourceScore(physMem, float64(n.AllocatableMemory), usedMem)
 		}
-		usedMem := reportedUsage(float64(n.AllocatableMemory)-float64(n.AvailableMemory)) +
-			float64(pending)*float64(requestedMemory) + float64(requestedMemory)
-		scoreMem := resourceScore(physMem, float64(n.AllocatableMemory), usedMem)
 
 		var scoreCPU float64
 		if cpuEnabled {
@@ -230,10 +239,21 @@ func selectNode(
 			return candidates[i].scoreTotal > candidates[j].scoreTotal
 		}
 
-		// Tie-break: raw memory headroom. Scores tie when every candidate
-		// reads as saturated, and there the node with the most room left is
-		// the useful answer.
-		return candidates[i].AvailableMemory > candidates[j].AvailableMemory
+		// First tie-break: raw memory headroom. Scores tie once every
+		// candidate reads as saturated, and there the node with the most room
+		// left is still the useful answer — it is real information the score
+		// threw away when it clamped at zero.
+		if candidates[i].AvailableMemory != candidates[j].AvailableMemory {
+			return candidates[i].AvailableMemory > candidates[j].AvailableMemory
+		}
+
+		// Last tie-break: fewest placements already sent to the node. This is
+		// what is left when the score says nothing and availability says
+		// nothing either — identical hardware with both tolerances at 100, or
+		// both adjustments at 0. Without it a burst would pick the same node
+		// every time, since the availability above is exactly what Proxmox has
+		// not caught up with yet.
+		return candidates[i].pending < candidates[j].pending
 	})
 
 	decision := candidates[0].Name
@@ -307,33 +327,48 @@ func reportedUsage(reported float64) float64 {
 // resourceScore returns the non-linear headroom score for a single resource.
 // A unit of free capacity in the physical range is worth 1 point; a unit in the
 // overcommit range is worth overbookDiscount points. The raw ratio is normalised
-// by the physical capacity and raised to saturationExponent so that nodes close
-// to full are penalised disproportionately more than nodes with room to spare.
+// by the capacity actually on offer and raised to saturationExponent so that
+// nodes close to full are penalised disproportionately more than nodes with room
+// to spare.
+//
+// The score always spans the full [0, 1], whatever the adjustment, so that the
+// tolerances stay comparable between memory and CPU. That needs the ratio
+// pinned at both ends:
+//
+//   - The top end: without normalising by an empty node the maximum would be
+//     1 + overbookDiscount*(alloc/phys - 1), squared — 1.0 at 100% but 4.0 at
+//     300%. Memory and CPU usually run at different adjustments, so summing
+//     their weighted scores would silently give the more overcommitted resource
+//     several times the intended weight.
+//
+//   - The bottom end: an adjustment below 100 caps allocation under the
+//     physical size, and measuring headroom against the physical size then
+//     never reaches 0 — at 50% an exhausted node still scores 0.25, at 25% it
+//     scores 0.5625. The resource would vary over a fraction of the range the
+//     other one uses and so weigh less than its tolerance says. Capping the
+//     reference at the allocatable amount is also what underprovisioning
+//     means: the operator reserved that headroom, so a node that has spent its
+//     quota is full, whatever the host could still physically take.
 func resourceScore(phys, alloc, used float64) float64 {
-	if phys <= 0 {
+	// What the operator actually offers in the non-overcommitted range:
+	// the physical size, or the lower cap an adjustment below 100 imposes.
+	offered := math.Min(phys, alloc)
+	if offered <= 0 {
 		return 0
 	}
-	freePhys := phys - used
-	if freePhys < 0 {
-		freePhys = 0
+
+	freeOffered := offered - used
+	if freeOffered < 0 {
+		freeOffered = 0
 	}
-	freeOver := alloc - math.Max(used, phys)
+	freeOver := alloc - math.Max(used, offered)
 	if freeOver < 0 {
 		freeOver = 0
 	}
 
-	// Normalise against a completely empty node, so the result is always in
-	// [0, 1] whatever the adjustment. Without this the maximum score is
-	// 1 + overbookDiscount*(alloc/phys - 1), squared: 1.0 at 100% but 4.0 at
-	// 300%. Memory and CPU usually run at different adjustments, so summing
-	// their weighted scores would silently give the more overcommitted
-	// resource several times the intended weight.
-	maxFreeOver := alloc - phys
-	if maxFreeOver < 0 {
-		maxFreeOver = 0
-	}
+	maxFreeOver := alloc - offered
 
-	raw := (freePhys + overbookDiscount*freeOver) / (phys + overbookDiscount*maxFreeOver)
+	raw := (freeOffered + overbookDiscount*freeOver) / (offered + overbookDiscount*maxFreeOver)
 
 	return math.Pow(raw, saturationExponent)
 }
@@ -342,6 +377,13 @@ func resourceScore(phys, alloc, used float64) float64 {
 // the request: InsufficientMemoryError if no node has enough memory available,
 // otherwise InsufficientCPUError pointing at the node with the largest CPU headroom.
 func buildInsufficientError(nodes []nodeInfo, requestedMemory uint64, requestedCPUs int32) error {
+	// Callers gate on a non-empty allowed-node list, so this is unreachable
+	// today; indexing into the empty slice below would panic if that ever
+	// stopped holding.
+	if len(nodes) == 0 {
+		return errors.New("no node to schedule on: the allowed node list is empty")
+	}
+
 	byMem := make([]nodeInfo, len(nodes))
 	copy(byMem, nodes)
 	sort.Sort(sortByAvailableMemory(byMem))

@@ -1132,7 +1132,10 @@ spec:
                               memoryAdjustment allows to adjust a node's memory by a given percentage.
                               For example, setting it to 300 allows to allocate 300% of a host's memory for VMs,
                               and setting it to 95 limits memory allocation to 95% of a host's memory.
-                              Setting it to 0 entirely disables scheduling memory constraints.
+                              A value below 100 is a real ceiling: a node that has handed out its share
+                              scores as full even though the host still has memory free.
+                              Setting it to 0 entirely disables scheduling memory constraints, both the
+                              hard-fit check and the contribution to the score.
                               By default 100% of a node's memory will be used for allocation.
                             format: int64
                             minimum: 0
@@ -1141,7 +1144,9 @@ spec:
                             description: |-
                               memoryTolerance expresses how acceptable it is to saturate memory on a node,
                               in [0, 100]. Lower values make the scheduler more protective of memory.
-                              Only used when cpuAdjustment > 0. Defaults to 0.
+                              It weighs memory against CPU, so it only changes a decision when
+                              cpuAdjustment > 0 — except at 100, which drops memory from the score
+                              whether or not CPU is enabled. Defaults to 0.
                             format: int64
                             maximum: 100
                             minimum: 0
@@ -1310,7 +1315,10 @@ spec:
                                     memoryAdjustment allows to adjust a node's memory by a given percentage.
                                     For example, setting it to 300 allows to allocate 300% of a host's memory for VMs,
                                     and setting it to 95 limits memory allocation to 95% of a host's memory.
-                                    Setting it to 0 entirely disables scheduling memory constraints.
+                                    A value below 100 is a real ceiling: a node that has handed out its share
+                                    scores as full even though the host still has memory free.
+                                    Setting it to 0 entirely disables scheduling memory constraints, both the
+                                    hard-fit check and the contribution to the score.
                                     By default 100% of a node's memory will be used for allocation.
                                   format: int64
                                   minimum: 0
@@ -1319,7 +1327,9 @@ spec:
                                   description: |-
                                     memoryTolerance expresses how acceptable it is to saturate memory on a node,
                                     in [0, 100]. Lower values make the scheduler more protective of memory.
-                                    Only used when cpuAdjustment > 0. Defaults to 0.
+                                    It weighs memory against CPU, so it only changes a decision when
+                                    cpuAdjustment > 0 — except at 100, which drops memory from the score
+                                    whether or not CPU is enabled. Defaults to 0.
                                   format: int64
                                   maximum: 100
                                   minimum: 0

@@ -226,6 +226,8 @@ Two details worth knowing when reading the numbers:
 
 - **Capacity is logical CPUs**, that is sockets × cores × threads as Proxmox reports them in `cpuinfo.cpus`. The adjustment truncates: 64 cores at `95` allocate 60, not 60.8.
 - **Stopped guests still reserve.** Usage sums the configured vCPUs of every guest on the node, containers included and powered-off machines too; only templates are skipped. A reservation is about the right to start, which a stopped machine keeps, so counting only what runs would hand out the same cores twice. Memory has always worked this way.
+- **An adjustment below 100 is a real ceiling.** Saturation is measured against the allocatable amount, not against the hardware behind it, so at `memoryAdjustment: 95` a node that has handed out its 95% scores as full even though the host still has RAM. That is what reserving headroom means; it also keeps the score spanning the whole `[0, 1]`, so the two tolerances stay comparable when memory and CPU run at different adjustments.
+- **`memoryAdjustment: 0` removes memory from the decision**, not just from the hard-fit check: with no ceiling to measure against, scoring memory would rank nodes by raw size alone. CPU behaves the same way at `cpuAdjustment: 0`. With both at `0` the scheduler has nothing left to rank on and falls back to free memory, then to the node with the fewest placements in flight.
 
 #### Per-zone scheduler hints
 
