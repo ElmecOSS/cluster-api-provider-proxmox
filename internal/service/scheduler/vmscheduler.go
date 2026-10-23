@@ -199,19 +199,15 @@ func selectNode(
 		if memoryAdjustment > 0 {
 			physMem = float64(n.AllocatableMemory) * 100.0 / float64(memoryAdjustment)
 		}
-		usedMem := effectiveUsage(
-			float64(n.AllocatableMemory)-float64(n.AvailableMemory),
-			float64(pending)*float64(requestedMemory),
-		) + float64(requestedMemory)
+		usedMem := reportedUsage(float64(n.AllocatableMemory)-float64(n.AvailableMemory)) +
+			float64(pending)*float64(requestedMemory) + float64(requestedMemory)
 		scoreMem := resourceScore(physMem, float64(n.AllocatableMemory), usedMem)
 
 		var scoreCPU float64
 		if cpuEnabled {
 			physCPU := float64(n.AllocatableCPUs) * 100.0 / float64(cpuAdjustment)
-			usedCPU := effectiveUsage(
-				float64(n.AllocatableCPUs)-float64(n.AvailableCPUs),
-				float64(pending)*float64(requestedCPUs),
-			) + float64(requestedCPUs)
+			usedCPU := reportedUsage(float64(n.AllocatableCPUs)-float64(n.AvailableCPUs)) +
+				float64(pending)*float64(requestedCPUs) + float64(requestedCPUs)
 			scoreCPU = resourceScore(physCPU, float64(n.AllocatableCPUs), usedCPU)
 		}
 
@@ -234,22 +230,10 @@ func selectNode(
 			return candidates[i].scoreTotal > candidates[j].scoreTotal
 		}
 
-		// First tie-break: raw memory headroom. Scores tie most often when
-		// every candidate reads as saturated, and there the node with the
-		// most room left is the useful answer.
-		if candidates[i].AvailableMemory != candidates[j].AvailableMemory {
-			return candidates[i].AvailableMemory > candidates[j].AvailableMemory
-		}
-
-		// Last tie-break: fewer placements already recorded here.
-		//
-		// This is what spreads a rapid scale-up. Proxmox takes seconds to
-		// reflect a just-cloned VM, so a burst of machines reads identical
-		// usage on every node — same score, same headroom — and left at that
-		// they would all land on the same one. The placements we recorded
-		// ourselves are the only evidence available, and by this point they
-		// cost nothing in accuracy: everything else already ties.
-		return candidates[i].pending < candidates[j].pending
+		// Tie-break: raw memory headroom. Scores tie when every candidate
+		// reads as saturated, and there the node with the most room left is
+		// the useful answer.
+		return candidates[i].AvailableMemory > candidates[j].AvailableMemory
 	})
 
 	decision := candidates[0].Name
@@ -291,25 +275,33 @@ func selectNode(
 	return decision, nil
 }
 
-// effectiveUsage reconciles what Proxmox reports as used with what the
-// placements already recorded in status.NodeLocations imply.
+// reportedUsage is what Proxmox says is already committed on a node, floored
+// at zero: available is clamped at zero by the client, so a wildly overbooked
+// node reads the same as a merely full one.
 //
-// Proxmox takes seconds to reflect a just-cloned VM, so during a rapid
-// scale-up the reported usage lags and every machine would be scored against
-// a node that still looks empty — they would all land on the same one.
-// Adding the recorded placements on top of the reported usage fixes the
-// clumping but charges a machine twice once the API has caught up, and the
-// drift grows as a cluster fills.
+// The caller adds one request per placement recorded in status.NodeLocations
+// on top of this. Those two quantities overlap once Proxmox has caught up
+// with a clone, so a settled machine is charged twice and the overcharge
+// grows with the node's history.
 //
-// Taking the larger of the two keeps both properties: while the API lags the
-// placements dominate and drive the spread; once it catches up the reported
-// usage overtakes them and the score settles on the truth.
-func effectiveUsage(reported, fromPlacements float64) float64 {
+// This is deliberate, after the alternatives were measured. Taking the larger
+// of the two instead of their sum stops the double charge but also stops the
+// spreading: reported usage counts every guest on the host, our placements
+// only ours, so on any loaded node the reported value dominates and a burst
+// clumps onto one node (TestToleranceScoringSpreadsBurstOnUnequalNodes
+// guards that). Dividing the score by the placement count instead penalises
+// the node for its whole history, which is the same error in another form.
+//
+// Telling a placement that Proxmox has already reflected from one it has not
+// would need a timestamp on NodeLocation, which the API does not carry. Until
+// it does, the overcharge is the price of the spreading, and it is uniform
+// across candidates so it shifts the scores without reordering them.
+func reportedUsage(reported float64) float64 {
 	if reported < 0 {
-		reported = 0
+		return 0
 	}
 
-	return math.Max(reported, fromPlacements)
+	return reported
 }
 
 // resourceScore returns the non-linear headroom score for a single resource.

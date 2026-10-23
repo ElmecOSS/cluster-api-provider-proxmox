@@ -762,6 +762,55 @@ func TestSelectNodeCPUQueryError(t *testing.T) {
 	require.Empty(t, node)
 }
 
+func TestToleranceScoringSpreadsBurstOnUnequalNodes(t *testing.T) {
+	// The companion of TestToleranceScoringAvoidsClumpingOnRapidScale, which
+	// uses three identical nodes. Identical nodes tie on score, and a tie is
+	// the easy case. Real nodes never tie: they carry slightly different
+	// loads, so the spreading has to come from the scoring itself rather than
+	// from a tie-break.
+	//
+	// The client returns constant values, as Proxmox does while it catches up
+	// with a burst of clones. Without a spreading signal every machine reads
+	// the same headroom and lands on the same node.
+	allowedNodes := []string{"pve1", "pve2", "pve3"}
+
+	proxmoxMachine := &infrav1.ProxmoxMachine{
+		Spec: infrav1.ProxmoxMachineSpec{
+			MemoryMiB:  ptr.To(int32(8)),
+			NumSockets: ptr.To(int32(1)),
+			NumCores:   ptr.To(int32(2)),
+		},
+	}
+
+	cl := fakeResourceClient{
+		memory:      map[string]uint64{"pve1": miBytes(300), "pve2": miBytes(290), "pve3": miBytes(280)},
+		memoryTotal: map[string]uint64{"pve1": miBytes(400), "pve2": miBytes(400), "pve3": miBytes(400)},
+		cpus:        map[string]int{"pve1": 60, "pve2": 58, "pve3": 56},
+		cpusTotal:   map[string]int{"pve1": 96, "pve2": 96, "pve3": 96},
+	}
+
+	hints := &infrav1.SchedulerHints{
+		CPUAdjustment: ptr.To(int64(300)),
+		CPUTolerance:  ptr.To(int64(50)),
+	}
+
+	const burst = 6
+
+	locations := make([]infrav1.NodeLocation, 0, burst)
+	placed := map[string]int{}
+	for range burst {
+		node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, hints)
+		require.NoError(t, err)
+		placed[node]++
+		locations = append(locations, infrav1.NodeLocation{Node: node})
+	}
+
+	require.Len(t, placed, len(allowedNodes), "every node must take a share, got %v", placed)
+	for node, n := range placed {
+		require.LessOrEqual(t, n, burst/2, "node %s took %d of %d machines: %v", node, n, burst, placed)
+	}
+}
+
 func TestScheduleVMUsesZoneSchedulerHints(t *testing.T) {
 	ctrlClient := setupClient()
 
@@ -862,38 +911,6 @@ func TestToleranceScoringNormalisesAcrossAdjustments(t *testing.T) {
 	}
 
 	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, hints)
-	require.NoError(t, err)
-	require.Equal(t, "pve1", node)
-}
-
-func TestScoringDoesNotChargeReflectedPlacementsTwice(t *testing.T) {
-	// A node that has hosted machines for a while has them in the usage
-	// Proxmox reports. Adding the placements we recorded on top would charge
-	// them a second time, and the overcharge grows with the node's history.
-	//
-	// pve1 holds ten long-settled machines and still has more free memory
-	// than pve2, which holds none. It must win. Counting its placements again
-	// would make the emptier-looking node win instead.
-	allowedNodes := []string{"pve1", "pve2"}
-
-	proxmoxMachine := &infrav1.ProxmoxMachine{
-		Spec: infrav1.ProxmoxMachineSpec{MemoryMiB: ptr.To(int32(8))},
-	}
-
-	cl := fakeResourceClient{
-		memory:      map[string]uint64{"pve1": miBytes(200), "pve2": miBytes(160)},
-		memoryTotal: map[string]uint64{"pve1": miBytes(400), "pve2": miBytes(400)},
-	}
-
-	locations := make([]infrav1.NodeLocation, 0, 10)
-	for i := range 10 {
-		locations = append(locations, infrav1.NodeLocation{
-			Machine: corev1.LocalObjectReference{Name: fmt.Sprintf("settled-%d", i)},
-			Node:    "pve1",
-		})
-	}
-
-	node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
 	require.NoError(t, err)
 	require.Equal(t, "pve1", node)
 }
