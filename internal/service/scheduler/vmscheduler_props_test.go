@@ -120,7 +120,7 @@ func TestPropSelectNodeOnlyReturnsNodesThatFit(t *testing.T) {
 		}
 
 		cl := fakeResourceClient{memory: mem, memoryTotal: memTotal, cpus: cpus, cpusTotal: cpusTotal}
-		node, err := selectNode(context.Background(), cl, machine, locations, names, hints)
+		node, err := selectNode(context.Background(), cl, machine, locations, names, nil, hints)
 		if err != nil {
 			continue
 		}
@@ -190,7 +190,7 @@ func TestPropNeitherResourceIsStructurallyFavoured(t *testing.T) {
 				memory: toBytes(memUnits), memoryTotal: toBytes(memTotalUnits),
 				cpus: cpus, cpusTotal: cpusTotal,
 			},
-			machine, nil, names, &infrav1.SchedulerHints{
+			machine, nil, names, nil, &infrav1.SchedulerHints{
 				MemoryAdjustment: &memAdj, CPUAdjustment: &cpuAdj,
 				MemoryTolerance: &memTol, CPUTolerance: &cpuTol,
 			})
@@ -200,7 +200,7 @@ func TestPropNeitherResourceIsStructurallyFavoured(t *testing.T) {
 				memory: toBytes(cpus), memoryTotal: toBytes(cpusTotal),
 				cpus: memUnits, cpusTotal: memTotalUnits,
 			},
-			machine, nil, names, &infrav1.SchedulerHints{
+			machine, nil, names, nil, &infrav1.SchedulerHints{
 				MemoryAdjustment: &cpuAdj, CPUAdjustment: &memAdj,
 				MemoryTolerance: &cpuTol, CPUTolerance: &memTol,
 			})

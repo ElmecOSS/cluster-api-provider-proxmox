@@ -80,7 +80,43 @@ func ScheduleVM(ctx context.Context, machineScope *scope.MachineScope) (string, 
 
 	locations = locationsInZone(locations, machineScope.Zone())
 
-	return selectNode(ctx, client, machineScope.ProxmoxMachine, locations, machineScope.AllowedNodes(), schedulerHints)
+	allowedNodes := machineScope.AllowedNodes()
+	nodeZone := nodeToZone(machineScope.InfraCluster.ProxmoxCluster.Spec.ZoneConfigs, allowedNodes)
+
+	return selectNode(ctx, client, machineScope.ProxmoxMachine, locations, allowedNodes, nodeZone, schedulerHints)
+}
+
+// nodeToZone maps each candidate node to the zone that lists it.
+//
+// Nodes no zone lists are left out of the map rather than mapped to
+// themselves. The distinction matters: the balancing below keys off how many
+// zones the candidates span, and treating every unzoned node as a zone of its
+// own would turn a plain cluster into an all-zones one, putting placement
+// counts ahead of the capacity score for everybody.
+func nodeToZone(zoneConfigs []infrav1.ZoneConfigSpec, nodes []string) map[string]string {
+	if len(zoneConfigs) == 0 {
+		return nil
+	}
+
+	candidates := make(map[string]struct{}, len(nodes))
+	for _, n := range nodes {
+		candidates[n] = struct{}{}
+	}
+
+	zoneOf := make(map[string]string, len(nodes))
+	for _, zc := range zoneConfigs {
+		zone := ptr.Deref(zc.Zone, "")
+		if zone == "" {
+			continue
+		}
+		for _, node := range zc.Nodes {
+			if _, ok := candidates[node]; ok {
+				zoneOf[node] = zone
+			}
+		}
+	}
+
+	return zoneOf
 }
 
 // locationsInZone keeps only the placements that belong to the given zone.
@@ -129,6 +165,7 @@ func selectNode(
 	machine *infrav1.ProxmoxMachine,
 	locations []infrav1.NodeLocation,
 	allowedNodes []string,
+	nodeZone map[string]string,
 	schedulerHints *infrav1.SchedulerHints,
 ) (string, error) {
 	memoryAdjustment := schedulerHints.GetMemoryAdjustment()
@@ -177,6 +214,8 @@ func selectNode(
 		scoreCPU   float64
 		scoreTotal float64
 		pending    int
+		zone       string
+		zoneVMs    int
 	}
 
 	wMem := float64(100-memoryTolerance) / 100.0
@@ -186,6 +225,18 @@ func selectNode(
 	pendingCount := make(map[string]int, len(locations))
 	for _, nl := range locations {
 		pendingCount[nl.Node]++
+	}
+
+	// ...and per zone, keyed by the zone of the node a machine sits on rather
+	// than by NodeLocation.Zone. The two differ exactly where this matters:
+	// NodeLocation.Zone is the machine's failure domain, and the case that
+	// needs balancing is the one where machines carry no failure domain at
+	// all, so that field is empty while the nodes themselves are zoned.
+	zoneVMs := make(map[string]int, len(nodeZone))
+	for _, nl := range locations {
+		if zone, ok := nodeZone[nl.Node]; ok {
+			zoneVMs[zone]++
+		}
 	}
 
 	var candidates []scored
@@ -225,12 +276,15 @@ func selectNode(
 			scoreCPU = resourceScore(physCPU, float64(n.AllocatableCPUs), usedCPU)
 		}
 
+		zone := nodeZone[n.Name]
 		candidates = append(candidates, scored{
 			nodeInfo:   n,
 			scoreMem:   scoreMem,
 			scoreCPU:   scoreCPU,
 			scoreTotal: wMem*scoreMem + wCPU*scoreCPU,
 			pending:    pending,
+			zone:       zone,
+			zoneVMs:    zoneVMs[zone],
 		})
 	}
 
@@ -238,7 +292,28 @@ func selectNode(
 		return "", buildInsufficientError(nodes, requestedMemory, requestedCPUs)
 	}
 
+	// Zones are failure domains, so spreading across them outranks picking the
+	// roomiest node -- but only when there is a choice of zone to make. With
+	// one zone among the candidates, or none, this is inert and the score
+	// decides as before. That covers both a cluster with no zoneConfig and a
+	// machine whose failure domain already pinned it to a single zone.
+	//
+	// It does not replace the score, it precedes it: the hard-fit check above
+	// has already dropped every node that cannot take the VM, so the least
+	// loaded zone is always one that can, and the score still picks the node
+	// within it.
+	zonesAmongCandidates := make(map[string]struct{}, len(candidates))
+	for _, c := range candidates {
+		zonesAmongCandidates[c.zone] = struct{}{}
+	}
+	balanceZones := len(zonesAmongCandidates) > 1
+
 	sort.SliceStable(candidates, func(i, j int) bool {
+		// Zeroth, when the candidates span zones: the emptier zone wins.
+		if balanceZones && candidates[i].zoneVMs != candidates[j].zoneVMs {
+			return candidates[i].zoneVMs < candidates[j].zoneVMs
+		}
+
 		// Primary: the curve-based score, higher wins.
 		if candidates[i].scoreTotal != candidates[j].scoreTotal {
 			return candidates[i].scoreTotal > candidates[j].scoreTotal
@@ -267,6 +342,8 @@ func selectNode(
 		// only construct values when message should actually be logged
 		type logEntry struct {
 			Node       string  `json:"node"`
+			Zone       string  `json:"zone,omitempty"`
+			ZoneVMs    int     `json:"zoneVms,omitempty"`
 			Mem        uint64  `json:"availMem"`
 			CPU        int     `json:"availCpu"`
 			Pending    int     `json:"pending"`
@@ -278,6 +355,8 @@ func selectNode(
 		for i, c := range candidates {
 			entries[i] = logEntry{
 				Node:       c.Name,
+				Zone:       c.zone,
+				ZoneVMs:    c.zoneVMs,
 				Mem:        c.AvailableMemory,
 				CPU:        c.AvailableCPUs,
 				Pending:    c.pending,
@@ -293,6 +372,7 @@ func selectNode(
 			"requestedCPUs", requestedCPUs,
 			"memoryTolerance", memoryTolerance,
 			"cpuTolerance", cpuTolerance,
+			"balancingZones", balanceZones,
 			"resultNode", decision,
 		)
 	}
