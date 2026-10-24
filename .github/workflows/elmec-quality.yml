@@ -1,0 +1,66 @@
+# Elmec fork only — runs the quality gates on pushes to `elmec-main`.
+#
+# The upstream workflows (lint, test, govulncheck) trigger on pull requests
+# and on pushes to `main`. In this fork `main` is a pure upstream mirror and
+# the patch stack lives on `elmec-main`, so a commit pushed straight to the
+# default branch — an upstream merge, for instance — ran no gate at all. That
+# is how five reachable golang.org/x/net advisories sat unnoticed in the tree.
+#
+# Adding `elmec-main` to the upstream workflows would conflict on every sync,
+# so the triggers live here instead and the steps are duplicated. Keep them in
+# step with .github/workflows/{lint,test,govulncheck}.yml when those change.
+
+name: Elmec quality
+
+on:
+  push:
+    branches: ["elmec-main"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: elmec-quality-${{ github.ref }}
+
+jobs:
+  verify-and-test:
+    name: verify and test
+    runs-on: ubuntu-latest
+    container:
+      image: golang@sha256:b75d466dd608587fd66cca705a307ba65b889827d06ad61d6a75f0482b51b7c7 # 1.26.6-trixie
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # The container runs as root while the workspace belongs to the runner
+      # UID, and `git diff` inside `make verify` refuses a dubious ownership.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: make verify
+      - run: make test
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: golangci-lint
+        run: go tool golangci-lint run -v --timeout 10m
+      - name: build kube-api-linter
+        run: go tool golangci-lint custom
+      - name: kube-api-linter
+        run: ./bin/golangci-lint-kube-api-linter run -v --timeout 10m --config .golangci-kal.yml
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest # govulncheck OOMs on ubuntu-slim
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Plain text, not the SARIF upload the upstream workflow does: that one
+      # needs security-events write, and a push gate only has to fail loudly.
+      - run: go tool govulncheck ./...
