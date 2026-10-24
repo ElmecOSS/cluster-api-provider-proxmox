@@ -104,7 +104,7 @@ func TestCreateVM_ZoneTemplateOverride(t *testing.T) {
 	}
 
 	response := proxmox.VMCloneResponse{NewID: 456, Task: newTask()}
-	zoneClient.EXPECT().GetReservableMemoryBytes(ctx, "node1", int64(100)).Return(^uint64(0), nil).Once()
+	zoneClient.EXPECT().GetReservableMemoryBytes(ctx, "node1", int64(100)).Return(^uint64(0), ^uint64(0), nil).Once()
 	zoneClient.EXPECT().CloneVM(ctx, 999, expectedOptions).Return(response, nil).Once()
 
 	_, err := createVM(ctx, machineScope)
