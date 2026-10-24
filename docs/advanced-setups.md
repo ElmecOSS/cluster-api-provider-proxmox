@@ -115,7 +115,7 @@ clusterctl generate cluster test-dual-stack  \
 
 ## Cluster with LoadBalancer nodes
 
-The template for LoadBalancers is for [dual stack](##dual-stack) with [multiple nics](##multiple-nics). All
+The template for LoadBalancers is for [dual stack](#dual-stack) with [multiple nics](#multiple-nics). All
 environment variables regarding those need to be set. You may want to reduce the template to your usecase.
 
 The idea is that there are special nodes for load balancing. These have an extra network card which is supposed
@@ -253,6 +253,44 @@ spec:
 ```
 
 **The override is total**: zone and cluster hints are never merged, exactly as for `templateSource`. A zone that sets only `cpuAdjustment` does **not** keep the cluster's `memoryAdjustment` — it falls back to the built-in default. Spell out every field the zone needs; the admission webhook warns when a partial override drops a value the cluster had set.
+
+#### Spreading across zones
+
+Everything above decides *which node*. When the candidate nodes belong to more
+than one zone, a prior question is decided first: *which zone*. The scheduler
+picks the zone holding the fewest of the cluster's machines, and only then uses
+the capacity score to choose a node inside it.
+
+This matters because zones are failure domains and nodes are not. Counting
+placements per node alone lets a zone with more nodes take more machines: with
+`rack-a` on two nodes and `rack-b` on one, the first two machines both land in
+`rack-a` while `rack-b` stays empty. Every node looks evenly loaded, which is
+what hides the problem — losing `rack-a` would then cost two machines instead
+of one.
+
+Zone load is only consulted when there is a choice of zone to make. It is inert
+when:
+
+- the cluster has no `zoneConfig`, or
+- the machine carries a `failureDomain`, which already restricts the candidates
+  to that one zone.
+
+In both cases placement sorts exactly as it did before, on the capacity score.
+Nodes that no zone lists are not treated as zones of their own, so adding
+`zoneConfig` for part of a cluster does not change how the rest is scheduled.
+
+The hard-fit check still runs first, so the emptiest zone on offer is always one
+that can actually take the VM; a zone whose nodes are all full is never chosen
+over a zone that has room.
+
+**Full order of decision:**
+
+1. Nodes that cannot fit the request are dropped (memory, and CPU when
+   `cpuAdjustment > 0`).
+2. If the remaining candidates span several zones, the least loaded zone wins.
+3. Within that set, the highest capacity score wins.
+4. Ties go to the node with the most free memory, then to the one with the
+   fewest placements already in flight.
 
 ## Template lookup based on Proxmox tags
 
@@ -432,6 +470,21 @@ spec:
 Each zone gets its own IPAM pool (e.g. `my-cluster-rack-a-v4-icip`). Machines
 assigned to a zone receive IP addresses from that zone's pool automatically.
 
+**Workers without a `failureDomain`.** CAPI does not spread workers over
+failure domains the way KubeadmControlPlane spreads control plane replicas: a
+MachineSet copies the single `failureDomain` from its template onto every
+machine it creates. One MachineDeployment therefore either pins all its workers
+to one zone, as above, or — with the field left unset — leaves them unzoned and
+hands the scheduler candidates from every zone at once.
+
+Both are supported. Pinning gives CAPI the zone of each machine, which it needs
+for zone-aware remediation, at the cost of one MachineDeployment per zone.
+Leaving it unset keeps a single MachineDeployment, and the scheduler spreads the
+machines across zones itself — see
+[Spreading across zones](#spreading-across-zones). What it cannot do is tell
+CAPI which zone each machine ended up in, so pick pinning where remediation
+matters.
+
 ### Behavior without zones
 
 When no `zoneConfig` entries are present, `status.failureDomains` is not set.
@@ -441,7 +494,9 @@ without zones continue to work exactly as before.
 ### Limitations
 
 - Zones without a `nodes` list appear as failure domains but do not restrict VM placement
-  to specific Proxmox nodes. The IPAM pool selection still works per-zone.
+  to specific Proxmox nodes. The IPAM pool selection still works per-zone. Such a zone
+  also takes no part in spreading, which is driven by the node-to-zone mapping those
+  lists provide.
 
 Zones can also be backed by separate Proxmox clusters (multi-datacenter,
 upstream issue [#370](https://github.com/ionos-cloud/cluster-api-provider-proxmox/issues/370)):

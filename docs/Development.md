@@ -8,7 +8,7 @@ Table of contents
 * [About CAPMOX](#about-capmox)
 * [CAPMOX Dependencies](#capmox-dependencies)
 * [Getting Started](#getting-started)
-    * [Proxmox VE API Token](#promox-api-token)
+    * [Proxmox VE API Token](#proxmox-ve-api-token)
 * [Setting up a development environment](#how-to-setup-a-development-environment)
     * [Running Tilt](#running-tilt)
 * [Make Targets](#make-targets)

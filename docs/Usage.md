@@ -9,7 +9,7 @@ Table of contents
    * [Usage](#usage)
       * [Dependencies](#dependencies)
       * [Quick start](#quick-start)
-         * [Pre-requisites](#pre-requisites)
+         * [Pre-requisites](#prerequisites)
          * [Configuring and installing Cluster API Provider for Proxmox VE in a management cluster](#configuring-and-installing-cluster-api-provider-for-proxmox-ve-in-a-management-cluster)
          * [Create a Workload Cluster](#create-a-workload-cluster)
          * [Check the status of the cluster](#check-the-status-of-the-cluster)
