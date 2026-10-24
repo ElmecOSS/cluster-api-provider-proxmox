@@ -6,6 +6,19 @@ It ships Elmec features as a small patch stack on top of upstream and publishes
 its own clusterctl-consumable releases, while staying a drop-in replacement
 (same API groups, same CRDs) and keeping every feature upstreamable.
 
+## What the fork adds
+
+Every feature below is upstreamable and documented with the rest of the
+provider's; this is only the index.
+
+| Feature | Where |
+|---|---|
+| Zones as CAPI failure domains, with per-zone node lists and IPAM pools | [advanced-setups.md](advanced-setups.md#failure-domains-zone-based-placement) |
+| Zones backed by separate Proxmox clusters, each with its own credentials | [multi-dc.md](multi-dc.md) |
+| CPU-aware scheduling: CPU as a hard-fit constraint and a scoring dimension beside memory, weighted by tolerances | [advanced-setups.md](advanced-setups.md#cpu-aware-scheduling) |
+| Per-zone `schedulerHints`, for zones sitting on different hardware | [advanced-setups.md](advanced-setups.md#per-zone-scheduler-hints) |
+| Spreading machines across zones before choosing a node within one | [advanced-setups.md](advanced-setups.md#spreading-across-zones) |
+
 ## Branch model
 
 - **`main`** — pure fast-forward mirror of upstream `main`. Never carries Elmec

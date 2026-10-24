@@ -74,6 +74,12 @@ Machines land in zones via the CAPI failure-domain contract: KubeadmControlPlane
 spreads replicas across `status.failureDomains` automatically;
 MachineDeployments pin workers with `spec.template.spec.failureDomain`.
 
+A MachineDeployment that leaves `failureDomain` unset is also supported, and is
+the way to spread workers over every datacenter from a single deployment: the
+scheduler then balances them across zones before choosing a node within one.
+The trade-off is that CAPI does not learn which zone each machine ended up in.
+See [Spreading across zones](advanced-setups.md#spreading-across-zones).
+
 Every Proxmox operation of a machine — clone, config, task polling, IP
 tagging, power, **delete** — runs on its zone's client. If a zone's client
 cannot be resolved (missing zone config, missing secret, unreachable
