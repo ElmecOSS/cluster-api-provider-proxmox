@@ -113,7 +113,7 @@ func TestSelectNode(t *testing.T) {
 
 			cl := fakeResourceClient{memory: availableMem}
 
-			node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
+			node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, nil, &infrav1.SchedulerHints{})
 			require.NoError(t, err)
 			require.Equal(t, expectedNode, node)
 
@@ -133,7 +133,7 @@ func TestSelectNode(t *testing.T) {
 
 		cl := fakeResourceClient{memory: availableMem}
 
-		node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
+		node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, nil, &infrav1.SchedulerHints{})
 		require.ErrorAs(t, err, &InsufficientMemoryError{})
 		require.Empty(t, node)
 
@@ -176,7 +176,7 @@ func TestSelectNodeEvenlySpread(t *testing.T) {
 
 			cl := fakeResourceClient{memory: availableMem}
 
-			node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
+			node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, nil, &infrav1.SchedulerHints{})
 			require.NoError(t, err)
 			require.Equal(t, expectedNode, node)
 
@@ -196,7 +196,7 @@ func TestSelectNodeEvenlySpread(t *testing.T) {
 
 		cl := fakeResourceClient{memory: availableMem}
 
-		node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, &infrav1.SchedulerHints{})
+		node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, nil, &infrav1.SchedulerHints{})
 		require.ErrorAs(t, err, &InsufficientMemoryError{})
 		require.Empty(t, node)
 
@@ -313,7 +313,7 @@ func TestToleranceScoringCPUDisabled(t *testing.T) {
 		CPUTolerance:    ptr.To(int64(0)),
 		MemoryTolerance: ptr.To(int64(100)),
 	}
-	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, hints)
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, nil, hints)
 	require.NoError(t, err)
 	require.Equal(t, "pve2", node)
 }
@@ -473,7 +473,7 @@ func TestToleranceScoringDefaultsFollowMemory(t *testing.T) {
 	}
 
 	hints := &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(300))}
-	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, hints)
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, nil, hints)
 	require.NoError(t, err)
 	require.Equal(t, "pve1", node)
 }
@@ -504,7 +504,7 @@ func TestToleranceScoringCPUTolerancePicksCPUHeadroom(t *testing.T) {
 		MemoryTolerance: ptr.To(int64(100)),
 		CPUTolerance:    ptr.To(int64(0)),
 	}
-	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, hints)
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, nil, hints)
 	require.NoError(t, err)
 	require.Equal(t, "pve1", node)
 }
@@ -539,7 +539,7 @@ func TestToleranceScoringPenalizesOverbook(t *testing.T) {
 		MemoryTolerance: ptr.To(int64(100)),
 		CPUTolerance:    ptr.To(int64(0)),
 	}
-	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, hints)
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, nil, hints)
 	require.NoError(t, err)
 	require.Equal(t, "pve1", node)
 }
@@ -564,7 +564,7 @@ func TestToleranceScoringHardConstraintCPU(t *testing.T) {
 	}
 
 	hints := &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))}
-	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, hints)
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, nil, hints)
 	require.ErrorAs(t, err, &InsufficientCPUError{})
 	require.Empty(t, node)
 }
@@ -589,7 +589,7 @@ func TestToleranceScoringHardConstraintMemory(t *testing.T) {
 	}
 
 	hints := &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))}
-	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, hints)
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, nil, hints)
 	require.ErrorAs(t, err, &InsufficientMemoryError{})
 	require.Empty(t, node)
 }
@@ -646,7 +646,7 @@ func TestToleranceScoringHeterogeneousRegression(t *testing.T) {
 			memory: availMem, memoryTotal: memTotals,
 			cpus: availCPU, cpusTotal: cpuTotals,
 		}
-		node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, hints)
+		node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, nil, hints)
 		require.NoError(t, err, "round %d", i)
 		availCPU[node] -= 2
 		availMem[node] -= miBytes(8 * 1024)
@@ -706,7 +706,7 @@ func TestToleranceScoringAvoidsClumpingOnRapidScale(t *testing.T) {
 	placements := map[string]int{}
 	var locations []infrav1.NodeLocation
 	for i := 0; i < 6; i++ {
-		node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, hints)
+		node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, nil, hints)
 		require.NoError(t, err, "round %d", i)
 		placements[node]++
 		locations = append(locations, infrav1.NodeLocation{Node: node})
@@ -732,7 +732,7 @@ func TestSelectNodeMemoryQueryError(t *testing.T) {
 		memErr: fmt.Errorf("connection refused"),
 	}
 
-	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, []string{"pve1"}, &infrav1.SchedulerHints{})
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, []string{"pve1"}, nil, &infrav1.SchedulerHints{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "connection refused")
 	require.Empty(t, node)
@@ -756,7 +756,7 @@ func TestSelectNodeCPUQueryError(t *testing.T) {
 	}
 
 	hints := &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))}
-	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, []string{"pve1"}, hints)
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, []string{"pve1"}, nil, hints)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "node unavailable")
 	require.Empty(t, node)
@@ -799,7 +799,7 @@ func TestToleranceScoringSpreadsBurstOnUnequalNodes(t *testing.T) {
 	locations := make([]infrav1.NodeLocation, 0, burst)
 	placed := map[string]int{}
 	for range burst {
-		node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, hints)
+		node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, nil, hints)
 		require.NoError(t, err)
 		placed[node]++
 		locations = append(locations, infrav1.NodeLocation{Node: node})
@@ -910,7 +910,7 @@ func TestToleranceScoringNormalisesAcrossAdjustments(t *testing.T) {
 		CPUTolerance:     ptr.To(int64(50)),
 	}
 
-	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, hints)
+	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, nil, hints)
 	require.NoError(t, err)
 	require.Equal(t, "pve1", node)
 }
@@ -976,7 +976,7 @@ func TestScoringMeasuresSaturationAgainstTheAllocatableCap(t *testing.T) {
 	}
 
 	node, err := selectNode(context.Background(), cl, twoCoreMachine(), nil,
-		[]string{"pve1", "pve2"}, &infrav1.SchedulerHints{
+		[]string{"pve1", "pve2"}, nil, &infrav1.SchedulerHints{
 			MemoryAdjustment: ptr.To(int64(25)),
 			CPUAdjustment:    ptr.To(int64(100)),
 			MemoryTolerance:  ptr.To(int64(0)),
@@ -1003,7 +1003,7 @@ func TestDisabledMemoryDoesNotDecide(t *testing.T) {
 	}
 
 	node, err := selectNode(context.Background(), cl, twoCoreMachine(), nil,
-		[]string{"pve1", "pve2"}, &infrav1.SchedulerHints{
+		[]string{"pve1", "pve2"}, nil, &infrav1.SchedulerHints{
 			MemoryAdjustment: ptr.To(int64(0)),
 			CPUAdjustment:    ptr.To(int64(100)),
 			MemoryTolerance:  ptr.To(int64(0)),
@@ -1026,7 +1026,7 @@ func TestPendingBreaksTieWhenNothingElseDoes(t *testing.T) {
 	locations := []infrav1.NodeLocation{{Node: "pve1"}}
 
 	node, err := selectNode(context.Background(), cl, twoCoreMachine(), locations,
-		[]string{"pve1", "pve2"}, &infrav1.SchedulerHints{
+		[]string{"pve1", "pve2"}, nil, &infrav1.SchedulerHints{
 			MemoryAdjustment: ptr.To(int64(0)),
 			CPUAdjustment:    ptr.To(int64(0)),
 		})
@@ -1062,7 +1062,7 @@ func TestOversizedCPURequestDoesNotWrap(t *testing.T) {
 	}
 
 	node, err := selectNode(context.Background(), cl, machine, nil,
-		[]string{"pve1"}, &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))})
+		[]string{"pve1"}, nil, &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))})
 
 	require.ErrorAs(t, err, &InsufficientCPUError{})
 	require.Empty(t, node)
@@ -1087,7 +1087,107 @@ func TestNegativeCPURequestDoesNotInflateScore(t *testing.T) {
 	}
 
 	_, err := selectNode(context.Background(), cl, machine, nil,
-		[]string{"pve1"}, &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))})
+		[]string{"pve1"}, nil, &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))})
 
 	require.ErrorAs(t, err, &InsufficientCPUError{})
+}
+
+// zonedCluster builds the node->zone map the scheduler receives, the way
+// ScheduleVM builds it from spec.zoneConfig.
+func zonedNodes(zones map[string][]string) map[string]string {
+	out := map[string]string{}
+	for zone, nodes := range zones {
+		for _, n := range nodes {
+			out[n] = zone
+		}
+	}
+	return out
+}
+
+func evenNodes(names ...string) fakeResourceClient {
+	mem, memTotal := map[string]uint64{}, map[string]uint64{}
+	for _, n := range names {
+		mem[n], memTotal[n] = giBytes(64), giBytes(64)
+	}
+	return fakeResourceClient{memory: mem, memoryTotal: memTotal}
+}
+
+// TestSelectNodeBalancesAcrossAvailabilityZones is the scenario from the
+// round-robin-per-zone work in ElmecOSS PR #2 (R34SGA), itself the consensus
+// from upstream discussion #896: az-1 has two nodes and
+// az-2 one, so counting placements per node lets the bigger zone absorb the
+// first two VMs while the other stays empty. Zones are failure domains, so
+// that is the one distribution they exist to prevent.
+func TestSelectNodeBalancesAcrossAvailabilityZones(t *testing.T) {
+	nodeZone := zonedNodes(map[string][]string{"az-1": {"pve1", "pve2"}, "az-2": {"pve3"}})
+	allowed := []string{"pve1", "pve2", "pve3"}
+
+	locations := make([]infrav1.NodeLocation, 0, 4)
+	perZone := map[string]int{}
+
+	for range 4 {
+		node, err := selectNode(context.Background(), evenNodes(allowed...), twoCoreMachine(),
+			locations, allowed, nodeZone, &infrav1.SchedulerHints{})
+		require.NoError(t, err)
+		perZone[nodeZone[node]]++
+		// no failure domain on the machine: the location records no zone
+		locations = append(locations, infrav1.NodeLocation{Node: node})
+	}
+
+	require.Equal(t, 2, perZone["az-1"], "the two-node zone must not take more than its share")
+	require.Equal(t, 2, perZone["az-2"])
+}
+
+// Within one zone the score decides, so a multi-node zone still spreads over
+// its own nodes rather than stacking everything on the first one.
+func TestSelectNodeBalancesNodesWithinAvailabilityZone(t *testing.T) {
+	nodeZone := zonedNodes(map[string][]string{"az-1": {"pve1", "pve2"}, "az-2": {"pve3", "pve4"}})
+	allowed := []string{"pve1", "pve2", "pve3", "pve4"}
+
+	locations := make([]infrav1.NodeLocation, 0, 4)
+	perNode := map[string]int{}
+
+	for range 4 {
+		node, err := selectNode(context.Background(), evenNodes(allowed...), twoCoreMachine(),
+			locations, allowed, nodeZone, &infrav1.SchedulerHints{})
+		require.NoError(t, err)
+		perNode[node]++
+		locations = append(locations, infrav1.NodeLocation{Node: node})
+	}
+
+	for _, n := range allowed {
+		require.Equal(t, 1, perNode[n], "node %s should have taken exactly one VM", n)
+	}
+}
+
+// Balancing must stay inert without zones, otherwise placement counts would
+// outrank the capacity score for every cluster that has no zoneConfig.
+func TestZoneBalancingIsInertWithoutZones(t *testing.T) {
+	allowed := []string{"pve1", "pve2"}
+	cl := fakeResourceClient{
+		// pve1 is the roomier node and must keep winning on score alone,
+		// even once it holds more placements than pve2.
+		memory:      map[string]uint64{"pve1": giBytes(64), "pve2": giBytes(8)},
+		memoryTotal: map[string]uint64{"pve1": giBytes(64), "pve2": giBytes(8)},
+	}
+	locations := []infrav1.NodeLocation{{Node: "pve1"}, {Node: "pve1"}}
+
+	node, err := selectNode(context.Background(), cl, twoCoreMachine(), locations, allowed, nil,
+		&infrav1.SchedulerHints{})
+
+	require.NoError(t, err)
+	require.Equal(t, "pve1", node)
+}
+
+func TestNodeToZone(t *testing.T) {
+	zoneConfigs := []infrav1.ZoneConfigSpec{
+		{Zone: ptr.To("az-1"), Nodes: []string{"pve1", "pve2"}},
+		{Zone: ptr.To("az-2"), Nodes: []string{"pve3"}},
+	}
+
+	got := nodeToZone(zoneConfigs, []string{"pve1", "pve3", "pve9"})
+
+	require.Equal(t, map[string]string{"pve1": "az-1", "pve3": "az-2"}, got,
+		"a node no zone lists is left out, not mapped to itself")
+	require.Nil(t, nodeToZone(nil, []string{"pve1"}), "no zones configured, no map")
 }
