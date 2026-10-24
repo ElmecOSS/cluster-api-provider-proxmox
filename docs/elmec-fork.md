@@ -22,8 +22,15 @@ its own clusterctl-consumable releases, while staying a drop-in replacement
   `git fetch upstream --tags && git push origin --tags`.
 - **`elmec-main`** (default branch) — the patch stack: upstream `main` plus, in
   order, the Elmec CI commits (`elmec-sync.yml`, `elmec-image.yml`,
-  `elmec-release.yml`) and the Elmec feature commits. Kept linear, no merge
-  commits.
+  `elmec-release.yml`, `elmec-quality.yml`) and the Elmec feature commits.
+  Kept linear, no merge commits.
+
+The upstream quality workflows trigger on pull requests and on pushes to
+`main`, which here is the upstream mirror — so a commit pushed straight to
+`elmec-main` runs none of them. `elmec-quality.yml` closes that gap, running
+verify, test, lint and govulncheck on every push to the default branch. Its
+steps duplicate the upstream ones on purpose: adding `elmec-main` to those
+files would conflict on every sync.
 
 Feature branches that back an open upstream PR (e.g. `feat/failure-domains`,
 upstream PR #720) must never be rebased onto `elmec-main` — that would inject
