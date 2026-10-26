@@ -42,7 +42,7 @@ if [[ -z "${credentialed_zones}" ]]; then
 fi
 
 echo "Zones with their own credentialsRef:"
-echo "${credentialed_zones}" | sed 's/^/  /'
+echo "  ${credentialed_zones//$'\n'/$'\n'  }"
 
 # 1. status.nodeLocations must not reference a credentialed zone.
 while read -r cluster zone; do
@@ -54,7 +54,7 @@ while read -r cluster zone; do
     | .machine.name')
   if [[ -n "${machines}" ]]; then
     echo "FAIL: ${cluster}: machines still placed in credentialed zone \"${zone}\":"
-    echo "${machines}" | sed 's/^/    /'
+    echo "    ${machines//$'\n'/$'\n'    }"
     fail=1
   fi
 done <<< "${credentialed_zones}"
@@ -69,7 +69,7 @@ while read -r cluster zone; do
     .items[] | select(.spec.failureDomain == $zone) | .metadata.name')
   if [[ -n "${machines}" ]]; then
     echo "FAIL: ${cluster}: CAPI Machines still reference failure domain \"${zone}\":"
-    echo "${machines}" | sed 's/^/    /'
+    echo "    ${machines//$'\n'/$'\n'    }"
     fail=1
   fi
 done <<< "${credentialed_zones}"
@@ -85,7 +85,7 @@ nilzone=$(echo "${clusters}" | jq -r '
   | "\($c.metadata.namespace)/\($c.metadata.name) \(.machine.name)"')
 if [[ -n "${nilzone}" ]]; then
   echo "FAIL: machines with no recorded zone in status.nodeLocations (verify manually which endpoint hosts them):"
-  echo "${nilzone}" | sed 's/^/    /'
+  echo "    ${nilzone//$'\n'/$'\n'    }"
   fail=1
 fi
 
