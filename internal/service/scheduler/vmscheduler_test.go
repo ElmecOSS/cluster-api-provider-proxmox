@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -300,18 +299,18 @@ func TestToleranceScoringCPUDisabled(t *testing.T) {
 
 	proxmoxMachine := &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(8)),
-			NumSockets: ptr.To(int32(2)),
-			NumCores:   ptr.To(int32(4)),
+			MemoryMiB:  new(int32(8)),
+			NumSockets: new(int32(2)),
+			NumCores:   new(int32(4)),
 		},
 	}
 
 	cl := fakeResourceClient{memory: availableMem}
 
 	hints := &infrav1.SchedulerHints{
-		CPUAdjustment:   ptr.To(int64(0)),
-		CPUTolerance:    ptr.To(int64(0)),
-		MemoryTolerance: ptr.To(int64(100)),
+		CPUAdjustment:   new(int64(0)),
+		CPUTolerance:    new(int64(0)),
+		MemoryTolerance: new(int64(100)),
 	}
 	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, nil, hints)
 	require.NoError(t, err)
@@ -459,9 +458,9 @@ func TestToleranceScoringDefaultsFollowMemory(t *testing.T) {
 
 	proxmoxMachine := &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(8)),
-			NumSockets: ptr.To(int32(1)),
-			NumCores:   ptr.To(int32(4)),
+			MemoryMiB:  new(int32(8)),
+			NumSockets: new(int32(1)),
+			NumCores:   new(int32(4)),
 		},
 	}
 
@@ -472,7 +471,7 @@ func TestToleranceScoringDefaultsFollowMemory(t *testing.T) {
 		cpusTotal:   map[string]int{"pve1": 64, "pve2": 64},
 	}
 
-	hints := &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(300))}
+	hints := &infrav1.SchedulerHints{CPUAdjustment: new(int64(300))}
 	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, nil, hints)
 	require.NoError(t, err)
 	require.Equal(t, "pve1", node)
@@ -486,9 +485,9 @@ func TestToleranceScoringCPUTolerancePicksCPUHeadroom(t *testing.T) {
 
 	proxmoxMachine := &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(8)),
-			NumSockets: ptr.To(int32(1)),
-			NumCores:   ptr.To(int32(4)),
+			MemoryMiB:  new(int32(8)),
+			NumSockets: new(int32(1)),
+			NumCores:   new(int32(4)),
 		},
 	}
 
@@ -500,9 +499,9 @@ func TestToleranceScoringCPUTolerancePicksCPUHeadroom(t *testing.T) {
 	}
 
 	hints := &infrav1.SchedulerHints{
-		CPUAdjustment:   ptr.To(int64(300)),
-		MemoryTolerance: ptr.To(int64(100)),
-		CPUTolerance:    ptr.To(int64(0)),
+		CPUAdjustment:   new(int64(300)),
+		MemoryTolerance: new(int64(100)),
+		CPUTolerance:    new(int64(0)),
 	}
 	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, nil, hints)
 	require.NoError(t, err)
@@ -519,9 +518,9 @@ func TestToleranceScoringPenalizesOverbook(t *testing.T) {
 
 	proxmoxMachine := &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(8)),
-			NumSockets: ptr.To(int32(1)),
-			NumCores:   ptr.To(int32(2)),
+			MemoryMiB:  new(int32(8)),
+			NumSockets: new(int32(1)),
+			NumCores:   new(int32(2)),
 		},
 	}
 
@@ -535,9 +534,9 @@ func TestToleranceScoringPenalizesOverbook(t *testing.T) {
 	}
 
 	hints := &infrav1.SchedulerHints{
-		CPUAdjustment:   ptr.To(int64(200)),
-		MemoryTolerance: ptr.To(int64(100)),
-		CPUTolerance:    ptr.To(int64(0)),
+		CPUAdjustment:   new(int64(200)),
+		MemoryTolerance: new(int64(100)),
+		CPUTolerance:    new(int64(0)),
 	}
 	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, nil, hints)
 	require.NoError(t, err)
@@ -550,9 +549,9 @@ func TestToleranceScoringHardConstraintCPU(t *testing.T) {
 
 	proxmoxMachine := &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(8)),
-			NumSockets: ptr.To(int32(1)),
-			NumCores:   ptr.To(int32(8)),
+			MemoryMiB:  new(int32(8)),
+			NumSockets: new(int32(1)),
+			NumCores:   new(int32(8)),
 		},
 	}
 
@@ -563,7 +562,7 @@ func TestToleranceScoringHardConstraintCPU(t *testing.T) {
 		cpusTotal:   map[string]int{"pve1": 16, "pve2": 16},
 	}
 
-	hints := &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))}
+	hints := &infrav1.SchedulerHints{CPUAdjustment: new(int64(100))}
 	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, nil, hints)
 	require.ErrorAs(t, err, &InsufficientCPUError{})
 	require.Empty(t, node)
@@ -575,9 +574,9 @@ func TestToleranceScoringHardConstraintMemory(t *testing.T) {
 
 	proxmoxMachine := &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(100)),
-			NumSockets: ptr.To(int32(1)),
-			NumCores:   ptr.To(int32(2)),
+			MemoryMiB:  new(int32(100)),
+			NumSockets: new(int32(1)),
+			NumCores:   new(int32(2)),
 		},
 	}
 
@@ -588,7 +587,7 @@ func TestToleranceScoringHardConstraintMemory(t *testing.T) {
 		cpusTotal:   map[string]int{"pve1": 64},
 	}
 
-	hints := &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))}
+	hints := &infrav1.SchedulerHints{CPUAdjustment: new(int64(100))}
 	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, nil, hints)
 	require.ErrorAs(t, err, &InsufficientMemoryError{})
 	require.Empty(t, node)
@@ -627,21 +626,21 @@ func TestToleranceScoringHeterogeneousRegression(t *testing.T) {
 	usedCPU := map[string]int{"big1": 0, "big2": 0, "small1": 0, "small2": 0}
 
 	hints := &infrav1.SchedulerHints{
-		CPUAdjustment:   ptr.To(int64(300)),
-		MemoryTolerance: ptr.To(int64(0)),
-		CPUTolerance:    ptr.To(int64(50)),
+		CPUAdjustment:   new(int64(300)),
+		MemoryTolerance: new(int64(0)),
+		CPUTolerance:    new(int64(50)),
 	}
 
 	proxmoxMachine := &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(8 * 1024)),
-			NumSockets: ptr.To(int32(1)),
-			NumCores:   ptr.To(int32(2)),
+			MemoryMiB:  new(int32(8 * 1024)),
+			NumSockets: new(int32(1)),
+			NumCores:   new(int32(2)),
 		},
 	}
 
-	var locations []infrav1.NodeLocation
-	for i := 0; i < 24; i++ {
+	locations := make([]infrav1.NodeLocation, 0, 24)
+	for i := range 24 {
 		cl := fakeResourceClient{
 			memory: availMem, memoryTotal: memTotals,
 			cpus: availCPU, cpusTotal: cpuTotals,
@@ -682,9 +681,9 @@ func TestToleranceScoringAvoidsClumpingOnRapidScale(t *testing.T) {
 
 	proxmoxMachine := &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(8 * 1024)),
-			NumSockets: ptr.To(int32(1)),
-			NumCores:   ptr.To(int32(2)),
+			MemoryMiB:  new(int32(8 * 1024)),
+			NumSockets: new(int32(1)),
+			NumCores:   new(int32(2)),
 		},
 	}
 
@@ -698,14 +697,14 @@ func TestToleranceScoringAvoidsClumpingOnRapidScale(t *testing.T) {
 	}
 
 	hints := &infrav1.SchedulerHints{
-		CPUAdjustment:   ptr.To(int64(300)),
-		MemoryTolerance: ptr.To(int64(0)),
-		CPUTolerance:    ptr.To(int64(50)),
+		CPUAdjustment:   new(int64(300)),
+		MemoryTolerance: new(int64(0)),
+		CPUTolerance:    new(int64(50)),
 	}
 
 	placements := map[string]int{}
-	var locations []infrav1.NodeLocation
-	for i := 0; i < 6; i++ {
+	locations := make([]infrav1.NodeLocation, 0, 6)
+	for i := range 6 {
 		node, err := selectNode(context.Background(), cl, proxmoxMachine, locations, allowedNodes, nil, hints)
 		require.NoError(t, err, "round %d", i)
 		placements[node]++
@@ -721,7 +720,7 @@ func TestToleranceScoringAvoidsClumpingOnRapidScale(t *testing.T) {
 func TestSelectNodeMemoryQueryError(t *testing.T) {
 	proxmoxMachine := &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB: ptr.To(int32(8)),
+			MemoryMiB: new(int32(8)),
 		},
 	}
 
@@ -741,9 +740,9 @@ func TestSelectNodeMemoryQueryError(t *testing.T) {
 func TestSelectNodeCPUQueryError(t *testing.T) {
 	proxmoxMachine := &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(8)),
-			NumSockets: ptr.To(int32(1)),
-			NumCores:   ptr.To(int32(4)),
+			MemoryMiB:  new(int32(8)),
+			NumSockets: new(int32(1)),
+			NumCores:   new(int32(4)),
 		},
 	}
 
@@ -755,7 +754,7 @@ func TestSelectNodeCPUQueryError(t *testing.T) {
 		cpuErr: fmt.Errorf("node unavailable"),
 	}
 
-	hints := &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))}
+	hints := &infrav1.SchedulerHints{CPUAdjustment: new(int64(100))}
 	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, []string{"pve1"}, nil, hints)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "node unavailable")
@@ -776,9 +775,9 @@ func TestToleranceScoringSpreadsBurstOnUnequalNodes(t *testing.T) {
 
 	proxmoxMachine := &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(8)),
-			NumSockets: ptr.To(int32(1)),
-			NumCores:   ptr.To(int32(2)),
+			MemoryMiB:  new(int32(8)),
+			NumSockets: new(int32(1)),
+			NumCores:   new(int32(2)),
 		},
 	}
 
@@ -790,8 +789,8 @@ func TestToleranceScoringSpreadsBurstOnUnequalNodes(t *testing.T) {
 	}
 
 	hints := &infrav1.SchedulerHints{
-		CPUAdjustment: ptr.To(int64(300)),
-		CPUTolerance:  ptr.To(int64(50)),
+		CPUAdjustment: new(int64(300)),
+		CPUTolerance:  new(int64(50)),
 	}
 
 	const burst = 6
@@ -821,12 +820,12 @@ func TestScheduleVMUsesZoneSchedulerHints(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "bar"},
 		Spec: infrav1.ProxmoxClusterSpec{
 			AllowedNodes:   []string{"pve1"},
-			SchedulerHints: &infrav1.SchedulerHints{MemoryAdjustment: ptr.To(int64(100))},
+			SchedulerHints: &infrav1.SchedulerHints{MemoryAdjustment: new(int64(100))},
 			ZoneConfigs: []infrav1.ZoneConfigSpec{
 				{
-					Zone:           ptr.To("zone-a"),
+					Zone:           new("zone-a"),
 					Nodes:          []string{"pve3"},
-					SchedulerHints: &infrav1.SchedulerHints{MemoryAdjustment: ptr.To(int64(250))},
+					SchedulerHints: &infrav1.SchedulerHints{MemoryAdjustment: new(int64(250))},
 				},
 			},
 		},
@@ -841,7 +840,7 @@ func TestScheduleVMUsesZoneSchedulerHints(t *testing.T) {
 			Name:   "foo-machine",
 			Labels: map[string]string{"cluster.x-k8s.io/cluster-name": "bar"},
 		},
-		Spec: infrav1.ProxmoxMachineSpec{MemoryMiB: ptr.To(int32(10))},
+		Spec: infrav1.ProxmoxMachineSpec{MemoryMiB: new(int32(10))},
 	}
 
 	fakeProxmoxClient := proxmoxtest.NewMockClient(t)
@@ -890,9 +889,9 @@ func TestToleranceScoringNormalisesAcrossAdjustments(t *testing.T) {
 
 	proxmoxMachine := &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(8)),
-			NumSockets: ptr.To(int32(1)),
-			NumCores:   ptr.To(int32(4)),
+			MemoryMiB:  new(int32(8)),
+			NumSockets: new(int32(1)),
+			NumCores:   new(int32(4)),
 		},
 	}
 
@@ -904,10 +903,10 @@ func TestToleranceScoringNormalisesAcrossAdjustments(t *testing.T) {
 	}
 
 	hints := &infrav1.SchedulerHints{
-		MemoryAdjustment: ptr.To(int64(100)),
-		CPUAdjustment:    ptr.To(int64(300)),
-		MemoryTolerance:  ptr.To(int64(50)),
-		CPUTolerance:     ptr.To(int64(50)),
+		MemoryAdjustment: new(int64(100)),
+		CPUAdjustment:    new(int64(300)),
+		MemoryTolerance:  new(int64(50)),
+		CPUTolerance:     new(int64(50)),
 	}
 
 	node, err := selectNode(context.Background(), cl, proxmoxMachine, nil, allowedNodes, nil, hints)
@@ -952,9 +951,9 @@ func giBytes(in int) uint64 {
 func twoCoreMachine() *infrav1.ProxmoxMachine {
 	return &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(2048)),
-			NumSockets: ptr.To(int32(1)),
-			NumCores:   ptr.To(int32(2)),
+			MemoryMiB:  new(int32(2048)),
+			NumSockets: new(int32(1)),
+			NumCores:   new(int32(2)),
 		},
 	}
 }
@@ -977,10 +976,10 @@ func TestScoringMeasuresSaturationAgainstTheAllocatableCap(t *testing.T) {
 
 	node, err := selectNode(context.Background(), cl, twoCoreMachine(), nil,
 		[]string{"pve1", "pve2"}, nil, &infrav1.SchedulerHints{
-			MemoryAdjustment: ptr.To(int64(25)),
-			CPUAdjustment:    ptr.To(int64(100)),
-			MemoryTolerance:  ptr.To(int64(0)),
-			CPUTolerance:     ptr.To(int64(0)),
+			MemoryAdjustment: new(int64(25)),
+			CPUAdjustment:    new(int64(100)),
+			MemoryTolerance:  new(int64(0)),
+			CPUTolerance:     new(int64(0)),
 		})
 
 	require.NoError(t, err)
@@ -1004,10 +1003,10 @@ func TestDisabledMemoryDoesNotDecide(t *testing.T) {
 
 	node, err := selectNode(context.Background(), cl, twoCoreMachine(), nil,
 		[]string{"pve1", "pve2"}, nil, &infrav1.SchedulerHints{
-			MemoryAdjustment: ptr.To(int64(0)),
-			CPUAdjustment:    ptr.To(int64(100)),
-			MemoryTolerance:  ptr.To(int64(0)),
-			CPUTolerance:     ptr.To(int64(0)),
+			MemoryAdjustment: new(int64(0)),
+			CPUAdjustment:    new(int64(100)),
+			MemoryTolerance:  new(int64(0)),
+			CPUTolerance:     new(int64(0)),
 		})
 
 	require.NoError(t, err)
@@ -1027,8 +1026,8 @@ func TestPendingBreaksTieWhenNothingElseDoes(t *testing.T) {
 
 	node, err := selectNode(context.Background(), cl, twoCoreMachine(), locations,
 		[]string{"pve1", "pve2"}, nil, &infrav1.SchedulerHints{
-			MemoryAdjustment: ptr.To(int64(0)),
-			CPUAdjustment:    ptr.To(int64(0)),
+			MemoryAdjustment: new(int64(0)),
+			CPUAdjustment:    new(int64(0)),
 		})
 
 	require.NoError(t, err)
@@ -1055,14 +1054,14 @@ func TestOversizedCPURequestDoesNotWrap(t *testing.T) {
 	}
 	machine := &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(2048)),
-			NumSockets: ptr.To(int32(65536)),
-			NumCores:   ptr.To(int32(65536)),
+			MemoryMiB:  new(int32(2048)),
+			NumSockets: new(int32(65536)),
+			NumCores:   new(int32(65536)),
 		},
 	}
 
 	node, err := selectNode(context.Background(), cl, machine, nil,
-		[]string{"pve1"}, nil, &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))})
+		[]string{"pve1"}, nil, &infrav1.SchedulerHints{CPUAdjustment: new(int64(100))})
 
 	require.ErrorAs(t, err, &InsufficientCPUError{})
 	require.Empty(t, node)
@@ -1080,14 +1079,14 @@ func TestNegativeCPURequestDoesNotInflateScore(t *testing.T) {
 	}
 	machine := &infrav1.ProxmoxMachine{
 		Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(2048)),
-			NumSockets: ptr.To(int32(50000)),
-			NumCores:   ptr.To(int32(50000)),
+			MemoryMiB:  new(int32(2048)),
+			NumSockets: new(int32(50000)),
+			NumCores:   new(int32(50000)),
 		},
 	}
 
 	_, err := selectNode(context.Background(), cl, machine, nil,
-		[]string{"pve1"}, nil, &infrav1.SchedulerHints{CPUAdjustment: ptr.To(int64(100))})
+		[]string{"pve1"}, nil, &infrav1.SchedulerHints{CPUAdjustment: new(int64(100))})
 
 	require.ErrorAs(t, err, &InsufficientCPUError{})
 }
@@ -1181,8 +1180,8 @@ func TestZoneBalancingIsInertWithoutZones(t *testing.T) {
 
 func TestNodeToZone(t *testing.T) {
 	zoneConfigs := []infrav1.ZoneConfigSpec{
-		{Zone: ptr.To("az-1"), Nodes: []string{"pve1", "pve2"}},
-		{Zone: ptr.To("az-2"), Nodes: []string{"pve3"}},
+		{Zone: new("az-1"), Nodes: []string{"pve1", "pve2"}},
+		{Zone: new("az-2"), Nodes: []string{"pve3"}},
 	}
 
 	got := nodeToZone(zoneConfigs, []string{"pve1", "pve3", "pve9"})
