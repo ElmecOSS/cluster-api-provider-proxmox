@@ -27,7 +27,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -177,10 +176,10 @@ func TestClientForZone(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "proxmoxcluster", Namespace: "default"},
 		Spec: infrav1.ProxmoxClusterSpec{
 			ZoneConfigs: []infrav1.ZoneConfigSpec{
-				{Zone: ptr.To("zone-a"), DNSServers: []string{"1.1.1.1"}},
-				{Zone: ptr.To("zone-b"), DNSServers: []string{"1.1.1.1"}, CredentialsRef: &corev1.SecretReference{Name: "zone-b-secret"}},
-				{Zone: ptr.To("zone-c"), DNSServers: []string{"1.1.1.1"}, CredentialsRef: &corev1.SecretReference{Name: "zone-c-secret"}},
-				{Zone: ptr.To("zone-d"), DNSServers: []string{"1.1.1.1"}, CredentialsRef: &corev1.SecretReference{Name: "no-such-secret"}},
+				{Zone: new("zone-a"), DNSServers: []string{"1.1.1.1"}},
+				{Zone: new("zone-b"), DNSServers: []string{"1.1.1.1"}, CredentialsRef: &corev1.SecretReference{Name: "zone-b-secret"}},
+				{Zone: new("zone-c"), DNSServers: []string{"1.1.1.1"}, CredentialsRef: &corev1.SecretReference{Name: "zone-c-secret"}},
+				{Zone: new("zone-d"), DNSServers: []string{"1.1.1.1"}, CredentialsRef: &corev1.SecretReference{Name: "no-such-secret"}},
 			},
 		},
 	}
@@ -205,31 +204,31 @@ func TestClientForZone(t *testing.T) {
 	require.Same(t, clusterClient, c)
 
 	// zone without credentialsRef → cluster client.
-	c, err = clusterScope.ClientForZone(ctx, ptr.To("zone-a"))
+	c, err = clusterScope.ClientForZone(ctx, new("zone-a"))
 	require.NoError(t, err)
 	require.Same(t, clusterClient, c)
 
 	// zone with credentialsRef → zone client, even though the cluster
 	// client is set.
-	c, err = clusterScope.ClientForZone(ctx, ptr.To("zone-b"))
+	c, err = clusterScope.ClientForZone(ctx, new("zone-b"))
 	require.NoError(t, err)
 	require.Same(t, zoneBClient, c)
 
 	// zone whose client construction fails → error, no fallback.
-	_, err = clusterScope.ClientForZone(ctx, ptr.To("zone-c"))
+	_, err = clusterScope.ClientForZone(ctx, new("zone-c"))
 	require.ErrorContains(t, err, "zone-c")
 
 	// zone whose secret is missing → error, no fallback.
-	_, err = clusterScope.ClientForZone(ctx, ptr.To("zone-d"))
+	_, err = clusterScope.ClientForZone(ctx, new("zone-d"))
 	require.ErrorContains(t, err, "failed to get credentials secret")
 
 	// unconfigured zone → fail closed.
-	_, err = clusterScope.ClientForZone(ctx, ptr.To("zone-gone"))
+	_, err = clusterScope.ClientForZone(ctx, new("zone-gone"))
 	require.ErrorContains(t, err, `zone "zone-gone" not configured`)
 
 	// the implicit "default" zone name always maps to the cluster client,
 	// even without a matching zoneConfig entry.
-	c, err = clusterScope.ClientForZone(ctx, ptr.To("default"))
+	c, err = clusterScope.ClientForZone(ctx, new("default"))
 	require.NoError(t, err)
 	require.Same(t, clusterClient, c)
 }

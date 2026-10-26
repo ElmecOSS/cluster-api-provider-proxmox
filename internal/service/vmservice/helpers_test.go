@@ -128,7 +128,7 @@ func setupZonedReconcilerTest(t *testing.T, zone string, mods ...testScopeMod) (
 
 	zoneMods := append([]testScopeMod{func(machine *clusterv1.Machine, infraCluster *infrav1.ProxmoxCluster, _ *infrav1.ProxmoxMachine) {
 		infraCluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
-			Zone:           ptr.To(zone),
+			Zone:           new(zone),
 			DNSServers:     []string{"1.2.3.4"},
 			Nodes:          []string{"node1"},
 			CredentialsRef: &corev1.SecretReference{Name: zoneCredentialsSecretName},

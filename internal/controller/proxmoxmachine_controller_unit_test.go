@@ -25,7 +25,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -78,8 +77,8 @@ func newDeleteTestMachineScope(t *testing.T, failureDomain string, vmID *int64) 
 			VirtualMachineID: vmID,
 			VirtualMachineCloneSpec: infrav1.VirtualMachineCloneSpec{
 				TemplateSource: infrav1.TemplateSource{
-					SourceNode: ptr.To("node1"),
-					TemplateID: ptr.To(int32(123)),
+					SourceNode: new("node1"),
+					TemplateID: new(int32(123)),
 				},
 			},
 		},
@@ -125,7 +124,7 @@ func newDeleteTestMachineScope(t *testing.T, failureDomain string, vmID *int64) 
 // resolved must never lose its finalizer, or its VM would be orphaned (or a
 // wrong-endpoint VM destroyed).
 func TestReconcileDelete_ZoneClientUnavailable_KeepsFinalizer(t *testing.T) {
-	r, machineScope := newDeleteTestMachineScope(t, "zone-gone", ptr.To(int64(123)))
+	r, machineScope := newDeleteTestMachineScope(t, "zone-gone", new(int64(123)))
 	require.Error(t, machineScope.ClientError())
 
 	_, err := r.reconcileDelete(context.Background(), machineScope)

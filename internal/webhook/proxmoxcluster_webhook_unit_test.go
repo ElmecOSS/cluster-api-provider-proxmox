@@ -21,7 +21,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/ptr"
 
 	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 )
@@ -30,7 +29,7 @@ func clusterWithZone(zone string, creds *corev1.SecretReference) *infrav1.Proxmo
 	cluster := validProxmoxCluster("zone-test-cluster")
 	cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{
 		{
-			Zone:           ptr.To(zone),
+			Zone:           new(zone),
 			DNSServers:     []string{"8.8.8.8"},
 			CredentialsRef: creds,
 		},
@@ -45,7 +44,7 @@ func placeMachineInZone(cluster *infrav1.ProxmoxCluster, machine, zone string) {
 			{
 				Machine: corev1.LocalObjectReference{Name: machine},
 				Node:    "pve1",
-				Zone:    ptr.To(zone),
+				Zone:    new(zone),
 			},
 		},
 	}
@@ -167,7 +166,7 @@ func TestZoneChangeWarnings(t *testing.T) {
 	require.Empty(t, zoneChangeWarnings(oldCluster, same))
 
 	// zone change but all locations carry a zone → no warning.
-	newCluster.Status.NodeLocations.Workers[0].Zone = ptr.To("zone-b")
+	newCluster.Status.NodeLocations.Workers[0].Zone = new("zone-b")
 	require.Empty(t, zoneChangeWarnings(oldCluster, newCluster))
 }
 

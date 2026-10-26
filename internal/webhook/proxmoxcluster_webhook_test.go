@@ -23,7 +23,6 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
@@ -113,7 +112,7 @@ var _ = Describe("Controller Test", func() {
 		It("should disallow a zone templateSource without template information", func() {
 			cluster := validProxmoxCluster("test-cluster-zone-template")
 			cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
-				Zone:           ptr.To("zone-a"),
+				Zone:           new("zone-a"),
 				DNSServers:     []string{"8.8.8.8"},
 				TemplateSource: &infrav1.TemplateSource{},
 			}}
@@ -123,14 +122,14 @@ var _ = Describe("Controller Test", func() {
 		It("should allow a zone with credentialsRef and a complete templateSource", func() {
 			cluster := validProxmoxCluster("succeed-test-cluster-zone-template")
 			cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
-				Zone:       ptr.To("zone-a"),
+				Zone:       new("zone-a"),
 				DNSServers: []string{"8.8.8.8"},
 				CredentialsRef: &corev1.SecretReference{
 					Name: "zone-a-credentials",
 				},
 				TemplateSource: &infrav1.TemplateSource{
-					SourceNode: ptr.To("pve1"),
-					TemplateID: ptr.To(int32(100)),
+					SourceNode: new("pve1"),
+					TemplateID: new(int32(100)),
 				},
 			}}
 			g.Expect(k8sClient.Create(testEnv.GetContext(), &cluster)).To(Succeed())

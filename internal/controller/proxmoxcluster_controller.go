@@ -601,7 +601,7 @@ func managedSecretKeys(proxmoxCluster *infrav1.ProxmoxCluster) []client.ObjectKe
 	}
 
 	var keys []client.ObjectKey
-	for _, item := range strings.Split(value, ",") {
+	for item := range strings.SplitSeq(value, ",") {
 		namespace, name, found := strings.Cut(item, "/")
 		if !found || namespace == "" || name == "" {
 			continue

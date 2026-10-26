@@ -28,7 +28,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -121,7 +120,7 @@ func zoneSecret(name string) *corev1.Secret {
 
 func credentialedZone(zone, secretName string) infrav1.ZoneConfigSpec {
 	return infrav1.ZoneConfigSpec{
-		Zone:           ptr.To(zone),
+		Zone:           new(zone),
 		DNSServers:     []string{"1.2.3.4"},
 		CredentialsRef: &corev1.SecretReference{Name: secretName},
 	}
@@ -184,7 +183,7 @@ func TestReconcileZoneClients_UnresolvableZoneSecret(t *testing.T) {
 func TestReconcileZoneClients_NoCredentialedZones(t *testing.T) {
 	factory := &stubZoneFactory{clients: map[string]capmox.Client{}}
 	r, clusterScope := newClusterControllerFixture(t, factory,
-		[]infrav1.ZoneConfigSpec{{Zone: ptr.To("plain"), DNSServers: []string{"1.2.3.4"}}})
+		[]infrav1.ZoneConfigSpec{{Zone: new("plain"), DNSServers: []string{"1.2.3.4"}}})
 
 	// pre-set the condition to prove it gets deleted.
 	conditions.Set(clusterScope.ProxmoxCluster, metav1.Condition{
@@ -257,7 +256,7 @@ func TestCredentialsSecretLifecycle(t *testing.T) {
 // its clone may be materializing on the zone endpoint.
 func TestReconcileDelete_InFlightTask_KeepsFinalizer(t *testing.T) {
 	r, machineScope := newDeleteTestMachineScope(t, "zone-gone", nil)
-	machineScope.ProxmoxMachine.Status.TaskRef = ptr.To("UPID:node1:001")
+	machineScope.ProxmoxMachine.Status.TaskRef = new("UPID:node1:001")
 
 	_, err := r.reconcileDelete(context.Background(), machineScope)
 	require.ErrorContains(t, err, "zone client unavailable")

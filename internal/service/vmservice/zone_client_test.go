@@ -23,7 +23,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 
 	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
@@ -88,8 +87,8 @@ func TestCreateVM_ZoneTemplateOverride(t *testing.T) {
 	machineScope, zoneClient := setupZonedReconcilerTest(t, "zone-b",
 		func(_ *clusterv1.Machine, infraCluster *infrav1.ProxmoxCluster, _ *infrav1.ProxmoxMachine) {
 			infraCluster.Spec.ZoneConfigs[0].TemplateSource = &infrav1.TemplateSource{
-				SourceNode: ptr.To("dc-b-node"),
-				TemplateID: ptr.To(int32(999)),
+				SourceNode: new("dc-b-node"),
+				TemplateID: new(int32(999)),
 			}
 		})
 
@@ -119,7 +118,7 @@ func TestCreateVM_ZoneTemplateOverride(t *testing.T) {
 func TestZoneWithoutCredentials_UsesClusterClient(t *testing.T) {
 	machineScope, clusterClient, _ := setupReconcilerTest(t, func(machine *clusterv1.Machine, infraCluster *infrav1.ProxmoxCluster, _ *infrav1.ProxmoxMachine) {
 		infraCluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
-			Zone:       ptr.To("zone-plain"),
+			Zone:       new("zone-plain"),
 			DNSServers: []string{"1.2.3.4"},
 			Nodes:      []string{"node1"},
 		}}
