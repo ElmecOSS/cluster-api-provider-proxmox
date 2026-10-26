@@ -28,7 +28,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"k8s.io/utils/ptr"
 
 	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 )
@@ -108,15 +107,15 @@ func TestPropSelectNodeOnlyReturnsNodesThatFit(t *testing.T) {
 		}
 
 		machine := &infrav1.ProxmoxMachine{Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(int32(1 + r.Intn(1<<14))),
-			NumSockets: ptr.To(int32(1 + r.Intn(2))),
-			NumCores:   ptr.To(int32(1 + r.Intn(32))),
+			MemoryMiB:  new(int32(1 + r.Intn(1<<14))),
+			NumSockets: new(int32(1 + r.Intn(2))),
+			NumCores:   new(int32(1 + r.Intn(32))),
 		}}
 		hints := &infrav1.SchedulerHints{
-			MemoryAdjustment: ptr.To(int64(r.Intn(400))),
-			CPUAdjustment:    ptr.To(int64(r.Intn(400))),
-			MemoryTolerance:  ptr.To(int64(r.Intn(101))),
-			CPUTolerance:     ptr.To(int64(r.Intn(101))),
+			MemoryAdjustment: new(int64(r.Intn(400))),
+			CPUAdjustment:    new(int64(r.Intn(400))),
+			MemoryTolerance:  new(int64(r.Intn(101))),
+			CPUTolerance:     new(int64(r.Intn(101))),
 		}
 
 		cl := fakeResourceClient{memory: mem, memoryTotal: memTotal, cpus: cpus, cpusTotal: cpusTotal}
@@ -180,9 +179,9 @@ func TestPropNeitherResourceIsStructurallyFavoured(t *testing.T) {
 		request := int32(1 + r.Intn(16))
 
 		machine := &infrav1.ProxmoxMachine{Spec: infrav1.ProxmoxMachineSpec{
-			MemoryMiB:  ptr.To(request * 1024),
-			NumSockets: ptr.To(int32(1)),
-			NumCores:   ptr.To(request),
+			MemoryMiB:  new(request * 1024),
+			NumSockets: new(int32(1)),
+			NumCores:   new(request),
 		}}
 
 		straight, err := selectNode(context.Background(),

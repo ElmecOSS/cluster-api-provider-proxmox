@@ -77,13 +77,13 @@ func TestValidateZoneNodes(t *testing.T) {
 	t.Run("own endpoint without nodes is fine when there is nothing to inherit", func(t *testing.T) {
 		// No cluster-level allowedNodes means the scheduler never runs: the
 		// machine lands on its template's node, which is on the zone endpoint.
-		cluster := zonedCluster(infrav1.ZoneConfigSpec{Zone: ptr.To("zone-a"), CredentialsRef: creds("creds-a")})
+		cluster := zonedCluster(infrav1.ZoneConfigSpec{Zone: new("zone-a"), CredentialsRef: creds("creds-a")})
 		cluster.Spec.AllowedNodes = nil
 		require.NoError(t, validateZoneNodes(cluster))
 	})
 
 	t.Run("own endpoint without nodes inherits a foreign node list", func(t *testing.T) {
-		cluster := zonedCluster(infrav1.ZoneConfigSpec{Zone: ptr.To("zone-a"), CredentialsRef: creds("creds-a")})
+		cluster := zonedCluster(infrav1.ZoneConfigSpec{Zone: new("zone-a"), CredentialsRef: creds("creds-a")})
 		cluster.Spec.AllowedNodes = []string{"pve1", "pve2"}
 		require.ErrorContains(t, validateZoneNodes(cluster), "must list its nodes when spec.allowedNodes is set")
 	})
@@ -94,8 +94,8 @@ func TestValidateZoneNodes(t *testing.T) {
 		// are assumed to be distinct endpoints; the webhook cannot read the
 		// secrets to confirm it.
 		cluster := zonedCluster(
-			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-a"), Nodes: []string{"pve1"}, CredentialsRef: creds("creds-a")},
-			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-b"), Nodes: []string{"pve1"}, CredentialsRef: creds("creds-b")},
+			infrav1.ZoneConfigSpec{Zone: new("zone-a"), Nodes: []string{"pve1"}, CredentialsRef: creds("creds-a")},
+			infrav1.ZoneConfigSpec{Zone: new("zone-b"), Nodes: []string{"pve1"}, CredentialsRef: creds("creds-b")},
 		)
 		require.NoError(t, validateZoneNodes(cluster))
 	})
@@ -103,8 +103,8 @@ func TestValidateZoneNodes(t *testing.T) {
 	t.Run("same node in two zones on the same endpoint is rejected", func(t *testing.T) {
 		// One host cannot be in two failure domains.
 		cluster := zonedCluster(
-			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-a"), Nodes: []string{"pve1", "pve2"}},
-			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-b"), Nodes: []string{"pve2", "pve3"}},
+			infrav1.ZoneConfigSpec{Zone: new("zone-a"), Nodes: []string{"pve1", "pve2"}},
+			infrav1.ZoneConfigSpec{Zone: new("zone-b"), Nodes: []string{"pve2", "pve3"}},
 		)
 		err := validateZoneNodes(cluster)
 		require.ErrorContains(t, err, "pve2")
@@ -113,16 +113,16 @@ func TestValidateZoneNodes(t *testing.T) {
 
 	t.Run("same node in two zones sharing one credentialsRef is rejected", func(t *testing.T) {
 		cluster := zonedCluster(
-			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-a"), Nodes: []string{"pve1"}, CredentialsRef: creds("shared")},
-			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-b"), Nodes: []string{"pve1"}, CredentialsRef: creds("shared")},
+			infrav1.ZoneConfigSpec{Zone: new("zone-a"), Nodes: []string{"pve1"}, CredentialsRef: creds("shared")},
+			infrav1.ZoneConfigSpec{Zone: new("zone-b"), Nodes: []string{"pve1"}, CredentialsRef: creds("shared")},
 		)
 		require.ErrorContains(t, validateZoneNodes(cluster), "declares the same credentialsRef")
 	})
 
 	t.Run("disjoint node lists on the cluster endpoint are fine", func(t *testing.T) {
 		cluster := zonedCluster(
-			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-a"), Nodes: []string{"pve1", "pve2"}},
-			infrav1.ZoneConfigSpec{Zone: ptr.To("zone-b"), Nodes: []string{"pve3"}},
+			infrav1.ZoneConfigSpec{Zone: new("zone-a"), Nodes: []string{"pve1", "pve2"}},
+			infrav1.ZoneConfigSpec{Zone: new("zone-b"), Nodes: []string{"pve3"}},
 		)
 		require.NoError(t, validateZoneNodes(cluster))
 	})
@@ -133,7 +133,7 @@ func TestZoneSchedulerHintsWarnings(t *testing.T) {
 		cluster := validProxmoxCluster("zone-hints-cluster")
 		cluster.Spec.SchedulerHints = clusterHints
 		cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{
-			{Zone: ptr.To("zone-a"), DNSServers: []string{"8.8.8.8"}, SchedulerHints: zoneHints},
+			{Zone: new("zone-a"), DNSServers: []string{"8.8.8.8"}, SchedulerHints: zoneHints},
 		}
 		return &cluster
 	}
@@ -141,10 +141,10 @@ func TestZoneSchedulerHintsWarnings(t *testing.T) {
 	t.Run("a partial override silently drops the cluster values", func(t *testing.T) {
 		cluster := withHints(
 			&infrav1.SchedulerHints{
-				MemoryAdjustment: ptr.To(int64(120)),
-				CPUAdjustment:    ptr.To(int64(300)),
+				MemoryAdjustment: new(int64(120)),
+				CPUAdjustment:    new(int64(300)),
 			},
-			&infrav1.SchedulerHints{MemoryAdjustment: ptr.To(int64(250))},
+			&infrav1.SchedulerHints{MemoryAdjustment: new(int64(250))},
 		)
 		warnings := zoneSchedulerHintsWarnings(cluster)
 		require.Len(t, warnings, 1)
@@ -153,18 +153,18 @@ func TestZoneSchedulerHintsWarnings(t *testing.T) {
 	})
 
 	t.Run("a complete override warns about nothing", func(t *testing.T) {
-		hints := &infrav1.SchedulerHints{MemoryAdjustment: ptr.To(int64(120))}
-		zone := &infrav1.SchedulerHints{MemoryAdjustment: ptr.To(int64(250))}
+		hints := &infrav1.SchedulerHints{MemoryAdjustment: new(int64(120))}
+		zone := &infrav1.SchedulerHints{MemoryAdjustment: new(int64(250))}
 		require.Empty(t, zoneSchedulerHintsWarnings(withHints(hints, zone)))
 	})
 
 	t.Run("no zone override, nothing to warn about", func(t *testing.T) {
-		hints := &infrav1.SchedulerHints{MemoryAdjustment: ptr.To(int64(120))}
+		hints := &infrav1.SchedulerHints{MemoryAdjustment: new(int64(120))}
 		require.Empty(t, zoneSchedulerHintsWarnings(withHints(hints, nil)))
 	})
 
 	t.Run("no cluster hints, there is nothing to lose", func(t *testing.T) {
-		zone := &infrav1.SchedulerHints{MemoryAdjustment: ptr.To(int64(250))}
+		zone := &infrav1.SchedulerHints{MemoryAdjustment: new(int64(250))}
 		require.Empty(t, zoneSchedulerHintsWarnings(withHints(nil, zone)))
 	})
 }
