@@ -361,7 +361,7 @@ spec:
                                                   description: Priority is the position
                                                     in the ip rule FIB table.
                                                   format: int32
-                                                  maximum: 4294967295
+                                                  maximum: 2147483647
                                                   type: integer
                                                   x-kubernetes-validations:
                                                   - message: Cowardly refusing to
@@ -575,7 +575,7 @@ spec:
                                                   description: Priority is the position
                                                     in the ip rule FIB table.
                                                   format: int32
-                                                  maximum: 4294967295
+                                                  maximum: 2147483647
                                                   type: integer
                                                   x-kubernetes-validations:
                                                   - message: Cowardly refusing to
@@ -600,7 +600,7 @@ spec:
                                             description: Table is the ID of the routing
                                               table used for the l3mdev vrf device.
                                             format: int32
-                                            maximum: 4294967295
+                                            maximum: 2147483647
                                             type: integer
                                             x-kubernetes-validations:
                                             - message: Cowardly refusing to insert
@@ -1107,14 +1107,48 @@ spec:
                           schedulerHints allows to influence the decision on where a VM will be scheduled. For example by applying a multiplicator
                           to a node's resources, to allow for overprovisioning or to ensure a node will always have a safety buffer.
                         properties:
+                          cpuAdjustment:
+                            description: |-
+                              cpuAdjustment allows to adjust a node's CPU capacity by a given percentage.
+                              For example, setting it to 300 allows allocating 300% of a host's CPU cores for VMs (3:1 overcommit),
+                              and setting it to 95 limits CPU allocation to 95% of the physical core count.
+                              Setting it to 0 entirely disables scheduling CPU constraints (default).
+                              When set to a non-zero value, CPU becomes a hard-fit constraint and a scoring
+                              dimension alongside memory; see memoryTolerance and cpuTolerance for tuning.
+                            format: int64
+                            minimum: 0
+                            type: integer
+                          cpuTolerance:
+                            description: |-
+                              cpuTolerance expresses how acceptable it is to saturate CPU on a node,
+                              in [0, 100]. Lower values make the scheduler more protective of CPU.
+                              Only used when cpuAdjustment > 0. Defaults to 100.
+                            format: int64
+                            maximum: 100
+                            minimum: 0
+                            type: integer
                           memoryAdjustment:
                             description: |-
                               memoryAdjustment allows to adjust a node's memory by a given percentage.
                               For example, setting it to 300 allows to allocate 300% of a host's memory for VMs,
                               and setting it to 95 limits memory allocation to 95% of a host's memory.
-                              Setting it to 0 entirely disables scheduling memory constraints.
+                              A value below 100 is a real ceiling: a node that has handed out its share
+                              scores as full even though the host still has memory free.
+                              Setting it to 0 entirely disables scheduling memory constraints, both the
+                              hard-fit check and the contribution to the score.
                               By default 100% of a node's memory will be used for allocation.
                             format: int64
+                            minimum: 0
+                            type: integer
+                          memoryTolerance:
+                            description: |-
+                              memoryTolerance expresses how acceptable it is to saturate memory on a node,
+                              in [0, 100]. Lower values make the scheduler more protective of memory.
+                              It weighs memory against CPU, so it only changes a decision when
+                              cpuAdjustment > 0 — except at 100, which drops memory from the score
+                              whether or not CPU is enabled. Defaults to 0.
+                            format: int64
+                            maximum: 100
                             minimum: 0
                             type: integer
                         type: object
@@ -1125,6 +1159,30 @@ spec:
                           description: ZoneConfigSpec is the Network Configuration
                             for further deployment zones.
                           properties:
+                            controlPlaneEligible:
+                              description: |-
+                                controlPlaneEligible indicates whether control plane machines may be
+                                placed in this zone. Defaults to true when not set.
+                              type: boolean
+                            credentialsRef:
+                              description: |-
+                                credentialsRef is a reference to a Secret that contains the Proxmox API
+                                credentials (keys: url, token, secret; optional: insecure, root_ca) for
+                                the Proxmox cluster backing this zone. When not set, the cluster-level
+                                credentials are used and behavior is identical to a single-endpoint
+                                setup. If no namespace is provided, the namespace of the ProxmoxCluster
+                                will be used.
+                              properties:
+                                name:
+                                  description: name is unique within a namespace to
+                                    reference a secret resource.
+                                  type: string
+                                namespace:
+                                  description: namespace defines the space within
+                                    which the secret name must be unique.
+                                  type: string
+                              type: object
+                              x-kubernetes-map-type: atomic
                             dnsServers:
                               description: dnsServers contains information about nameservers
                                 used by the machines in this zone.
@@ -1211,6 +1269,146 @@ spec:
                               x-kubernetes-validations:
                               - message: IPv6Config addresses must be provided
                                 rule: self.addresses.size() > 0
+                            nodes:
+                              description: |-
+                                nodes specifies the Proxmox nodes that belong to this zone.
+                                When set, machines assigned to this failure domain will only
+                                be placed on these nodes.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: set
+                            schedulerHints:
+                              description: |-
+                                schedulerHints overrides the cluster-level scheduler hints for machines
+                                placed in this zone. Zones are often backed by hosts with different core
+                                counts or memory, and a single cluster-wide adjustment cannot describe
+                                both.
+
+                                The override is total: zone and cluster hints are never merged, matching
+                                how templateSource behaves. A zone that sets only one field therefore
+                                loses the cluster values for the others and falls back to the built-in
+                                defaults, so spell out every field the zone needs.
+                              properties:
+                                cpuAdjustment:
+                                  description: |-
+                                    cpuAdjustment allows to adjust a node's CPU capacity by a given percentage.
+                                    For example, setting it to 300 allows allocating 300% of a host's CPU cores for VMs (3:1 overcommit),
+                                    and setting it to 95 limits CPU allocation to 95% of the physical core count.
+                                    Setting it to 0 entirely disables scheduling CPU constraints (default).
+                                    When set to a non-zero value, CPU becomes a hard-fit constraint and a scoring
+                                    dimension alongside memory; see memoryTolerance and cpuTolerance for tuning.
+                                  format: int64
+                                  minimum: 0
+                                  type: integer
+                                cpuTolerance:
+                                  description: |-
+                                    cpuTolerance expresses how acceptable it is to saturate CPU on a node,
+                                    in [0, 100]. Lower values make the scheduler more protective of CPU.
+                                    Only used when cpuAdjustment > 0. Defaults to 100.
+                                  format: int64
+                                  maximum: 100
+                                  minimum: 0
+                                  type: integer
+                                memoryAdjustment:
+                                  description: |-
+                                    memoryAdjustment allows to adjust a node's memory by a given percentage.
+                                    For example, setting it to 300 allows to allocate 300% of a host's memory for VMs,
+                                    and setting it to 95 limits memory allocation to 95% of a host's memory.
+                                    A value below 100 is a real ceiling: a node that has handed out its share
+                                    scores as full even though the host still has memory free.
+                                    Setting it to 0 entirely disables scheduling memory constraints, both the
+                                    hard-fit check and the contribution to the score.
+                                    By default 100% of a node's memory will be used for allocation.
+                                  format: int64
+                                  minimum: 0
+                                  type: integer
+                                memoryTolerance:
+                                  description: |-
+                                    memoryTolerance expresses how acceptable it is to saturate memory on a node,
+                                    in [0, 100]. Lower values make the scheduler more protective of memory.
+                                    It weighs memory against CPU, so it only changes a decision when
+                                    cpuAdjustment > 0 — except at 100, which drops memory from the score
+                                    whether or not CPU is enabled. Defaults to 0.
+                                  format: int64
+                                  maximum: 100
+                                  minimum: 0
+                                  type: integer
+                              type: object
+                              x-kubernetes-map-type: atomic
+                            templateSource:
+                              description: |-
+                                templateSource overrides the machine template source for machines
+                                placed in this zone. This is required in practice when the zone is
+                                backed by a different Proxmox cluster, because templates cannot be
+                                cloned across Proxmox clusters. When not set, the machine's own
+                                sourceNode/templateID/templateSelector are used. The override is total:
+                                zone and machine template sources are never merged.
+
+                                Completeness (templateSelector, or templateID with sourceNode) is
+                                enforced by the CEL rule on the TemplateSource type; stricter
+                                field-level XOR rules exceed the CEL cost budget inside a list item.
+                              properties:
+                                sourceNode:
+                                  description: |-
+                                    sourceNode is the initially selected proxmox node.
+                                    This node will be used to locate the template VM, which will
+                                    be used for cloning operations.
+
+                                    Cloning will be performed according to the configuration.
+                                    Setting the `Target` field will tell Proxmox to clone the
+                                    VM on that target node.
+
+                                    When Target is not set and the ProxmoxCluster contains
+                                    a set of `AllowedNodes`, the algorithm will instead evenly
+                                    distribute the VMs across the nodes from that list.
+
+                                    If neither a `Target` nor `AllowedNodes` was set, the VM
+                                    will be cloned onto the same node as SourceNode.
+                                  minLength: 1
+                                  type: string
+                                templateID:
+                                  description: templateID the vm_template vmid used
+                                    for cloning a new VM.
+                                  format: int32
+                                  type: integer
+                                templateSelector:
+                                  description: |-
+                                    templateSelector defines MatchTags for looking up VM templates.
+                                    If a templateID is defined, templateSelector will be ignored.
+                                  properties:
+                                    matchPolicy:
+                                      default: exact
+                                      description: |-
+                                        matchPolicy controls how MatchTags are evaluated against template tags.
+                                        When not set, or set to "exact", the behaviour is identical to the previous implementation
+                                        and requires an exact 1:1 tag match. When set to "subset", the template's tags must contain
+                                        all MatchTags, but may include additional tags.
+                                      enum:
+                                      - exact
+                                      - uniqueSubset
+                                      - bestSubset
+                                      type: string
+                                    matchTags:
+                                      description: |-
+                                        matchTags specifies all tags to look for when looking up the VM template.
+                                        Passed tags must be an exact 1:1 match with the tags on the template you want to use.
+                                        If multiple VM templates with the same set of tags are found, provisioning will fail.
+                                      items:
+                                        pattern: ^(?i)[a-z0-9_][a-z0-9_\-\+\.]*$
+                                        type: string
+                                      minItems: 1
+                                      type: array
+                                      x-kubernetes-list-type: set
+                                  required:
+                                  - matchTags
+                                  type: object
+                              type: object
+                              x-kubernetes-map-type: atomic
+                              x-kubernetes-validations:
+                              - message: Must specify either templateID or templateSelector
+                                rule: has(self.templateSelector) || (has(self.templateID)
+                                  && has(self.sourceNode))
                             zone:
                               description: zone is the name of your deployment zone.
                               pattern: ^[a-z0-9A-Z](?:[a-z0-9A-Z-_.]{0,61}[a-z0-9A-Z])?$

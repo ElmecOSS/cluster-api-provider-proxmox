@@ -310,7 +310,7 @@ spec:
                                 description: Priority is the position in the ip rule
                                   FIB table.
                                 format: int32
-                                maximum: 4294967295
+                                maximum: 2147483647
                                 type: integer
                                 x-kubernetes-validations:
                                 - message: Cowardly refusing to insert FIB rule matching
@@ -500,7 +500,7 @@ spec:
                                 description: Priority is the position in the ip rule
                                   FIB table.
                                 format: int32
-                                maximum: 4294967295
+                                maximum: 2147483647
                                 type: integer
                                 x-kubernetes-validations:
                                 - message: Cowardly refusing to insert FIB rule matching
@@ -522,7 +522,7 @@ spec:
                           description: Table is the ID of the routing table used for
                             the l3mdev vrf device.
                           format: int32
-                          maximum: 4294967295
+                          maximum: 2147483647
                           type: integer
                           x-kubernetes-validations:
                           - message: Cowardly refusing to insert l3mdev rules into
@@ -978,6 +978,12 @@ spec:
                     - message: Value is immutable
                       rule: self == oldSelf
                 type: object
+              failureDomain:
+                description: |-
+                  failureDomain is the failure domain the machine is placed in.
+                  This field is part of the Cluster API InfrastructureMachine contract
+                  and is set by the CAPI machine controller.
+                type: string
               format:
                 description: format for file storage. Only valid for full clone.
                 enum:
@@ -1141,9 +1147,13 @@ spec:
                                 minimum: 0
                                 type: integer
                               table:
-                                description: table is the routing table used for this
-                                  route.
+                                description: |-
+                                  table is the routing table used for this route.
+                                  A routing table ID is never negative; the renderers write it straight
+                                  into the guest's network configuration, where a negative value is
+                                  refused and the machine comes up without networking.
                                 format: int32
+                                minimum: 0
                                 type: integer
                               to:
                                 description: to is the subnet to be routed.
@@ -1181,8 +1191,13 @@ spec:
                                     kernel rules
                                   rule: (self > 0 && self < 32765) || (self > 32766)
                               table:
-                                description: table is the routing table ID.
+                                description: |-
+                                  table is the routing table ID.
+                                  A routing table ID is never negative; the renderers write it straight
+                                  into the guest's network configuration, where a negative value is
+                                  refused and the machine comes up without networking.
                                 format: int32
+                                minimum: 0
                                 type: integer
                               to:
                                 description: to is the subnet of the target.
@@ -1243,9 +1258,13 @@ spec:
                                 minimum: 0
                                 type: integer
                               table:
-                                description: table is the routing table used for this
-                                  route.
+                                description: |-
+                                  table is the routing table used for this route.
+                                  A routing table ID is never negative; the renderers write it straight
+                                  into the guest's network configuration, where a negative value is
+                                  refused and the machine comes up without networking.
                                 format: int32
+                                minimum: 0
                                 type: integer
                               to:
                                 description: to is the subnet to be routed.
@@ -1283,8 +1302,13 @@ spec:
                                     kernel rules
                                   rule: (self > 0 && self < 32765) || (self > 32766)
                               table:
-                                description: table is the routing table ID.
+                                description: |-
+                                  table is the routing table ID.
+                                  A routing table ID is never negative; the renderers write it straight
+                                  into the guest's network configuration, where a negative value is
+                                  refused and the machine comes up without networking.
                                 format: int32
+                                minimum: 0
                                 type: integer
                               to:
                                 description: to is the subnet of the target.
@@ -1294,10 +1318,15 @@ spec:
                           type: array
                           x-kubernetes-list-type: atomic
                         table:
-                          description: table is the ID of the routing table used for
-                            the l3mdev vrf device.
+                          description: |-
+                            table is the ID of the routing table used for the l3mdev vrf device.
+                            Linux routing table IDs are u32, but this field is an int32 all the way
+                            down to the renderers, so the maximum is the largest value that type can
+                            carry. A maximum above it is not merely unreachable: it makes the schema
+                            contradict its own int32 format, and the API server then rejects every
+                            object that sets the field at all.
                           format: int32
-                          maximum: 4294967295
+                          maximum: 2147483647
                           minimum: 1
                           type: integer
                           x-kubernetes-validations:

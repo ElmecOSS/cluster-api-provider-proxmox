@@ -53,7 +53,7 @@ func GetInClusterIPPoolRefs(ctx context.Context, machineScope *scope.MachineScop
 		IPv6 *corev1.TypedLocalObjectReference
 	}
 
-	pools, err := machineScope.IPAMHelper.GetInClusterPools(ctx, machineScope.ProxmoxMachine)
+	pools, err := machineScope.IPAMHelper.GetInClusterPools(ctx, machineScope.ProxmoxMachine, machineScope.Zone())
 	if err != nil {
 		return ret, err
 	}
@@ -102,7 +102,12 @@ func extractNetworkModel(input string) string {
 
 // extractNetworkBridge returns the bridge out of net device input e.g. virtio=A6:23:64:4D:84:CB,bridge=vmbr1,mtu=1500.
 func extractNetworkBridge(input string) string {
-	re := regexp.MustCompile(`bridge=(\w+)`)
+	// The value runs to the next comma: a bridge name may carry anything an
+	// interface name may, hyphens and the dot of a VLAN interface included,
+	// and \w would stop at the first of them -- reading vmbr-dmz as vmbr.
+	// The key is anchored to the start or a comma so that a longer key
+	// ending in the same word, say host_bridge=, cannot match it.
+	re := regexp.MustCompile(`(?:^|,)bridge=([^,]+)`)
 	match := re.FindStringSubmatch(input)
 	if len(match) > 1 {
 		return match[1]
@@ -112,7 +117,7 @@ func extractNetworkBridge(input string) string {
 
 // extractNetworkMTU returns the mtu out of net device input e.g. virtio=A6:23:64:4D:84:CB,bridge=vmbr1,mtu=1500.
 func extractNetworkMTU(input string) int32 {
-	re := regexp.MustCompile(`mtu=(\d+)`)
+	re := regexp.MustCompile(`(?:^|,)mtu=(\d+)`)
 	match := re.FindStringSubmatch(input)
 	if len(match) > 1 {
 		mtu, err := strconv.ParseInt(match[1], 10, 32)
@@ -127,7 +132,7 @@ func extractNetworkMTU(input string) int32 {
 
 // extractNetworkVLAN returns the vlan out of net device input e.g. virtio=A6:23:64:4D:84:CB,bridge=vmbr1,mtu=1500,tag=100.
 func extractNetworkVLAN(input string) int32 {
-	re := regexp.MustCompile(`tag=(\d+)`)
+	re := regexp.MustCompile(`(?:^|,)tag=(\d+)`)
 	match := re.FindStringSubmatch(input)
 	if len(match) > 1 {
 		vlan, err := strconv.ParseInt(match[1], 10, 32)
@@ -142,7 +147,7 @@ func extractNetworkVLAN(input string) int32 {
 
 // extractNetworkQueue returns the queue out of net device input e.g. virtio=A6:23:64:4D:84:CB,bridge=vmbr1,mtu=1500,tag=100,queues=4.
 func extractNetworkQueue(input string) int32 {
-	re := regexp.MustCompile(`queues=(\d+)`)
+	re := regexp.MustCompile(`(?:^|,)queues=(\d+)`)
 	match := re.FindStringSubmatch(input)
 	if len(match) > 1 {
 		queue, err := strconv.ParseUint(match[1], 10, 16)

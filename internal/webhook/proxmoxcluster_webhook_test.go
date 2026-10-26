@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -104,6 +105,75 @@ var _ = Describe("Controller Test", func() {
 				Gateway:   "2001:db8::1",
 			}
 			g.Expect(k8sClient.Create(testEnv.GetContext(), &cluster)).To(MatchError(ContainSubstring("addresses may not contain the endpoint IP")))
+		})
+	})
+
+	Context("zone template source", func() {
+		It("should disallow a zone templateSource without template information", func() {
+			cluster := validProxmoxCluster("test-cluster-zone-template")
+			cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
+				Zone:           new("zone-a"),
+				DNSServers:     []string{"8.8.8.8"},
+				TemplateSource: &infrav1.TemplateSource{},
+			}}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &cluster)).To(MatchError(ContainSubstring("Must specify either templateID or templateSelector")))
+		})
+
+		It("should allow a zone with credentialsRef and a complete templateSource", func() {
+			cluster := validProxmoxCluster("succeed-test-cluster-zone-template")
+			cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
+				Zone:       new("zone-a"),
+				DNSServers: []string{"8.8.8.8"},
+				CredentialsRef: &corev1.SecretReference{
+					Name: "zone-a-credentials",
+				},
+				TemplateSource: &infrav1.TemplateSource{
+					SourceNode: new("pve1"),
+					TemplateID: new(int32(100)),
+				},
+			}}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &cluster)).To(Succeed())
+		})
+	})
+
+	Context("zone scheduler hints", func() {
+		It("should accept per-zone scheduler hints", func() {
+			cluster := validProxmoxCluster("succeed-test-cluster-zone-hints")
+			cluster.Spec.SchedulerHints = &infrav1.SchedulerHints{
+				MemoryAdjustment: new(int64(100)),
+			}
+			cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
+				Zone:       new("zone-a"),
+				DNSServers: []string{"8.8.8.8"},
+				SchedulerHints: &infrav1.SchedulerHints{
+					MemoryAdjustment: new(int64(250)),
+					CPUAdjustment:    new(int64(300)),
+					MemoryTolerance:  new(int64(0)),
+					CPUTolerance:     new(int64(50)),
+				},
+			}}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &cluster)).To(Succeed())
+		})
+
+		It("should reject a tolerance above 100", func() {
+			// Only the real CRD schema enforces this; a Go test cannot.
+			cluster := validProxmoxCluster("test-cluster-zone-hints-tolerance")
+			cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
+				Zone:           new("zone-a"),
+				DNSServers:     []string{"8.8.8.8"},
+				SchedulerHints: &infrav1.SchedulerHints{CPUTolerance: new(int64(101))},
+			}}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &cluster)).To(MatchError(ContainSubstring("cpuTolerance")))
+		})
+
+		It("should reject a negative adjustment", func() {
+			cluster := validProxmoxCluster("test-cluster-zone-hints-adjustment")
+			cluster.Spec.ZoneConfigs = []infrav1.ZoneConfigSpec{{
+				Zone:           new("zone-a"),
+				DNSServers:     []string{"8.8.8.8"},
+				SchedulerHints: &infrav1.SchedulerHints{CPUAdjustment: new(int64(-1))},
+			}}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &cluster)).To(MatchError(ContainSubstring("cpuAdjustment")))
 		})
 	})
 

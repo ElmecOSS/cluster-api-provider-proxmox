@@ -73,7 +73,7 @@ Metrics are, like all network configuration, part of bootstrap, and will not rec
 ```bash
 clusterctl generate cluster test-multiple-vlans  \
   --infrastructure proxmox \
-  --kubernetes-version v1.34.8  \
+  --kubernetes-version v1.34.11  \
   --control-plane-machine-count=1 \
   --worker-machine-count=2 \
   --flavor=multiple-vlans > cluster.yaml
@@ -106,7 +106,7 @@ If you're using cilium, be aware that Cilium's helm chart requires `ipv6.enabled
 ```bash
 clusterctl generate cluster test-dual-stack  \
   --infrastructure proxmox \
-  --kubernetes-version v1.34.8  \
+  --kubernetes-version v1.34.11  \
   --control-plane-machine-count=1 \
   --worker-machine-count=2 \
   --flavor=dual-stack > cluster.yaml
@@ -115,7 +115,7 @@ clusterctl generate cluster test-dual-stack  \
 
 ## Cluster with LoadBalancer nodes
 
-The template for LoadBalancers is for [dual stack](##dual-stack) with [multiple nics](##multiple-nics). All
+The template for LoadBalancers is for [dual stack](#dual-stack) with [multiple nics](#multiple-nics). All
 environment variables regarding those need to be set. You may want to reduce the template to your usecase.
 
 The idea is that there are special nodes for load balancing. These have an extra network card which is supposed
@@ -162,7 +162,7 @@ METALLB_IPV6_RANGE:
 ```bash
 clusterctl generate cluster test-bgp-lb  \
   --infrastructure proxmox \
-  --kubernetes-version v1.34.8  \
+  --kubernetes-version v1.34.11  \
   --control-plane-machine-count=1 \
   --worker-machine-count=2 \
   --flavor=cilium-load-balancer > cluster.yaml
@@ -175,6 +175,122 @@ By default our scheduler only allows to allocate as much memory to guests as the
 This behaviour can be configured in the `ProxmoxCluster` CR through the field `.spec.schedulerHints.memoryAdjustment`.
 
 For example, setting it to `0` (zero), entirely disables scheduling based on memory. Alternatively, if you set it to any value greater than `0`, the scheduler will treat your host as it would have `${value}%` of memory. In real numbers that would mean, if you have a host with 64GB of memory and set the number to `300`, the scheduler would allow you to provision guests with a total of 192GB memory and therefore overprovision the host. (Use with caution! It's strongly suggested to have memory ballooning configured everywhere.). Or, if you were to set it to `95` for example, it would treat your host as it would only have 60,8GB of memory, and leave the remaining 3,2GB for the host.
+
+#### CPU-aware scheduling
+
+On heterogeneous Proxmox clusters — where nodes have different CPU core counts — the default memory-only scheduler distributes VMs by memory headroom alone, which can cause CPU overcommit on nodes with fewer cores.
+
+Setting `.spec.schedulerHints.cpuAdjustment` to a value greater than `0` adds CPU as a hard-fit constraint and as a scoring dimension alongside memory. For each candidate node, the scheduler computes a per-resource score based on remaining headroom after hypothetical placement: free capacity in the physical range counts fully, free capacity in the overcommit range counts less, and nodes close to saturation are penalized non-linearly. The two per-resource scores are then combined with weights derived from `memoryTolerance` and `cpuTolerance`, and the node with the highest total score wins.
+
+Two separate knobs control the behaviour:
+
+- **Adjustment** — how much overcommit to allow. `cpuAdjustment: 300` means a 64-core host can allocate up to 192 vCPUs; `cpuAdjustment: 100` disables overcommit.
+- **Tolerance** — how acceptable it is to saturate a resource, in `[0, 100]`. Higher tolerance means the scheduler is *more willing* to fill up that resource, so it contributes less to the decision.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `cpuAdjustment` | `0` | CPU not considered: no hard-fit check, no contribution to the score. Set to `100`+ to enable CPU-aware scoring. |
+| `memoryAdjustment` | `100` | Memory allocatable as `phys × value/100`. Values below 100 reserve memory for the host. |
+| `cpuTolerance` | `100` | By default CPU is only a hard-fit constraint; it does not drive the choice between fitting nodes. Lower it (e.g. `50`) to actively spread VMs across CPU capacity. |
+| `memoryTolerance` | `0` | Memory is fully protected: the scheduler always prefers nodes with more free memory. |
+
+**Example 1 — spread VMs across CPU while still protecting memory:**
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha2
+kind: ProxmoxCluster
+spec:
+  schedulerHints:
+    memoryAdjustment: 100
+    cpuAdjustment: 300
+    cpuTolerance: 50     # CPU spreading has moderate weight in the decision
+    memoryTolerance: 0   # memory always has maximum weight (default)
+```
+
+**Example 2 — RAM-constrained cluster, CPU headroom available:**
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha2
+kind: ProxmoxCluster
+spec:
+  schedulerHints:
+    memoryAdjustment: 95    # reserve 5% of RAM for the hypervisor
+    cpuAdjustment: 200
+    memoryTolerance: 0      # memory is precious (default)
+    cpuTolerance: 100       # CPU saturation is tolerated (default)
+```
+
+When `cpuAdjustment` is enabled, CPU and memory are **hard-fit constraints**: if no node can fit the requested VM (computed from `numSockets × numCores` and `memoryMiB` on the `ProxmoxMachine`), provisioning fails with `InsufficientCPUError` or `InsufficientMemoryError` respectively.
+
+Two details worth knowing when reading the numbers:
+
+- **Capacity is logical CPUs**, that is sockets × cores × threads as Proxmox reports them in `cpuinfo.cpus`. The adjustment truncates: 64 cores at `95` allocate 60, not 60.8.
+- **Stopped guests still reserve.** Usage sums the configured vCPUs of every guest on the node, containers included and powered-off machines too; only templates are skipped. A reservation is about the right to start, which a stopped machine keeps, so counting only what runs would hand out the same cores twice. Memory has always worked this way.
+- **An adjustment below 100 is a real ceiling.** Saturation is measured against the allocatable amount, not against the hardware behind it, so at `memoryAdjustment: 95` a node that has handed out its 95% scores as full even though the host still has RAM. That is what reserving headroom means; it also keeps the score spanning the whole `[0, 1]`, so the two tolerances stay comparable when memory and CPU run at different adjustments.
+- **A machine that inherits its size is invisible to the spreading.** `numCores`, `numSockets` and `memoryMiB` are optional, and leaving them out takes the template's values — which the scheduler cannot see, so it charges the placement nothing. The hard-fit check still passes (nothing is requested) and ranking falls back to what Proxmox reports, which lags a clone by a second or two. On identical nodes the placement count still breaks the tie; on unequal ones a burst can land on one node. Set them explicitly when creating many machines at once.
+- **`memoryAdjustment: 0` removes memory from the decision**, not just from the hard-fit check: with no ceiling to measure against, scoring memory would rank nodes by raw size alone. CPU behaves the same way at `cpuAdjustment: 0`. With both at `0` the scheduler has nothing left to rank on and falls back to free memory, then to the node with the fewest placements in flight.
+
+#### Per-zone scheduler hints
+
+On a cluster spanning several datacenters the zones often sit on different hardware, and a single cluster-wide adjustment cannot describe both. Any zone may therefore carry its own `schedulerHints`:
+
+```yaml
+spec:
+  schedulerHints:
+    memoryAdjustment: 100
+    cpuAdjustment: 200
+  zoneConfig:
+    - zone: dc1
+      # inherits the cluster hints above
+      dnsServers: [8.8.8.8]
+    - zone: dc2
+      dnsServers: [8.8.8.8]
+      schedulerHints:
+        memoryAdjustment: 100
+        cpuAdjustment: 300    # newer hosts, more cores to spread over
+        memoryTolerance: 0
+        cpuTolerance: 50
+```
+
+**The override is total**: zone and cluster hints are never merged, exactly as for `templateSource`. A zone that sets only `cpuAdjustment` does **not** keep the cluster's `memoryAdjustment` — it falls back to the built-in default. Spell out every field the zone needs; the admission webhook warns when a partial override drops a value the cluster had set.
+
+#### Spreading across zones
+
+Everything above decides *which node*. When the candidate nodes belong to more
+than one zone, a prior question is decided first: *which zone*. The scheduler
+picks the zone holding the fewest of the cluster's machines, and only then uses
+the capacity score to choose a node inside it.
+
+This matters because zones are failure domains and nodes are not. Counting
+placements per node alone lets a zone with more nodes take more machines: with
+`rack-a` on two nodes and `rack-b` on one, the first two machines both land in
+`rack-a` while `rack-b` stays empty. Every node looks evenly loaded, which is
+what hides the problem — losing `rack-a` would then cost two machines instead
+of one.
+
+Zone load is only consulted when there is a choice of zone to make. It is inert
+when:
+
+- the cluster has no `zoneConfig`, or
+- the machine carries a `failureDomain`, which already restricts the candidates
+  to that one zone.
+
+In both cases placement sorts exactly as it did before, on the capacity score.
+Nodes that no zone lists are not treated as zones of their own, so adding
+`zoneConfig` for part of a cluster does not change how the rest is scheduled.
+
+The hard-fit check still runs first, so the emptiest zone on offer is always one
+that can actually take the VM; a zone whose nodes are all full is never chosen
+over a zone that has room.
+
+**Full order of decision:**
+
+1. Nodes that cannot fit the request are dropped (memory, and CPU when
+   `cpuAdjustment > 0`).
+2. If the remaining candidates span several zones, the least loaded zone wins.
+3. Within that set, the highest capacity score wins.
+4. Ties go to the node with the most free memory, then to the one with the
+   fewest placements already in flight.
 
 ## Template lookup based on Proxmox tags
 
@@ -277,6 +393,114 @@ volumes:
 
 ```
 
+
+## Failure Domains (Zone-Based Placement)
+
+CAPMOX zones can be mapped to CAPI failure domains, enabling KubeadmControlPlane
+to automatically distribute control plane nodes across zones and MachineDeployments
+to target specific zones.
+
+### Configuration
+
+Add `nodes` and optionally `controlPlaneEligible` to each zone in `ProxmoxCluster.spec.zoneConfig`:
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha2
+kind: ProxmoxCluster
+metadata:
+  name: my-cluster
+spec:
+  allowedNodes:
+    - pve1
+    - pve2
+    - pve3
+    - pve4
+  ipv4Config:
+    addresses: ["10.0.0.10-10.0.0.50"]
+    prefix: 24
+    gateway: "10.0.0.1"
+  dnsServers: ["8.8.8.8"]
+  zoneConfig:
+    - zone: "rack-a"
+      nodes: ["pve1", "pve2"]
+      ipv4Config:
+        addresses: ["10.0.1.10-10.0.1.30"]
+        prefix: 24
+        gateway: "10.0.1.1"
+      dnsServers: ["8.8.8.8"]
+    - zone: "rack-b"
+      nodes: ["pve3", "pve4"]
+      controlPlaneEligible: false  # workers only
+      ipv4Config:
+        addresses: ["10.0.2.10-10.0.2.30"]
+        prefix: 24
+        gateway: "10.0.2.1"
+      dnsServers: ["8.8.8.8"]
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `nodes` | `[]string` | — | Proxmox nodes belonging to this zone. VMs assigned to this failure domain are scheduled only on these nodes. |
+| `controlPlaneEligible` | `*bool` | `true` | Whether control plane machines may be placed in this zone. Set to `false` for worker-only zones. |
+
+### How it works
+
+When `zoneConfig` entries include a `nodes` field, the cluster controller populates
+`status.failureDomains` on the ProxmoxCluster. The CAPI Cluster controller copies
+these to `Cluster.status.failureDomains`, and KubeadmControlPlane uses them to
+distribute control plane replicas round-robin across eligible zones.
+
+For workers, set `failureDomain` on MachineDeployments to pin them to a specific zone:
+
+```yaml
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: MachineDeployment
+metadata:
+  name: workers-rack-a
+spec:
+  clusterName: my-cluster
+  replicas: 3
+  template:
+    spec:
+      clusterName: my-cluster
+      failureDomain: "rack-a"
+      # ...
+```
+
+Each zone gets its own IPAM pool (e.g. `my-cluster-rack-a-v4-icip`). Machines
+assigned to a zone receive IP addresses from that zone's pool automatically.
+
+**Workers without a `failureDomain`.** CAPI does not spread workers over
+failure domains the way KubeadmControlPlane spreads control plane replicas: a
+MachineSet copies the single `failureDomain` from its template onto every
+machine it creates. One MachineDeployment therefore either pins all its workers
+to one zone, as above, or — with the field left unset — leaves them unzoned and
+hands the scheduler candidates from every zone at once.
+
+Both are supported. Pinning gives CAPI the zone of each machine, which it needs
+for zone-aware remediation, at the cost of one MachineDeployment per zone.
+Leaving it unset keeps a single MachineDeployment, and the scheduler spreads the
+machines across zones itself — see
+[Spreading across zones](#spreading-across-zones). What it cannot do is tell
+CAPI which zone each machine ended up in, so pick pinning where remediation
+matters.
+
+### Behavior without zones
+
+When no `zoneConfig` entries are present, `status.failureDomains` is not set.
+KubeadmControlPlane does not perform failure domain placement. Existing clusters
+without zones continue to work exactly as before.
+
+### Limitations
+
+- Zones without a `nodes` list appear as failure domains but do not restrict VM placement
+  to specific Proxmox nodes. The IPAM pool selection still works per-zone. Such a zone
+  also takes no part in spreading, which is driven by the node-to-zone mapping those
+  lists provide.
+
+Zones can also be backed by separate Proxmox clusters (multi-datacenter,
+upstream issue [#370](https://github.com/ionos-cloud/cluster-api-provider-proxmox/issues/370)):
+see [multi-dc.md](multi-dc.md).
 
 ## Custom Allowed Nodes for ProxmoxMachine
 

@@ -39,7 +39,21 @@ var (
 
 	// ErrVMNotInitialized VM is not Initialized in Proxmox.
 	ErrVMNotInitialized = errors.New("vm not initialized")
+
+	// ErrVMIDCollision indicates that a controller-allocated VMID belongs to another VM.
+	ErrVMIDCollision = errors.New("vmid belongs to a different vm")
 )
+
+const vmIDAllocatedByControllerAnnotation = "vmid.capmox.cluster.x-k8s.io/allocated-by-controller"
+
+func vmIDCollisionIsRecoverable(s *scope.MachineScope) bool {
+	return s.ProxmoxMachine.Spec.ProviderID == "" &&
+		s.ProxmoxMachine.Annotations[vmIDAllocatedByControllerAnnotation] == "true"
+}
+
+func placeholderVMName(vmID int64) string {
+	return fmt.Sprintf("VM %d", vmID)
+}
 
 // FindVM returns the Proxmox VM if the vmID is set, otherwise
 // returns ErrVMNotCreated or ErrVMNotFound if the VM doesn't exist.
@@ -49,13 +63,21 @@ func FindVM(ctx context.Context, scope *scope.MachineScope) (*proxmox.VirtualMac
 	if vmID > 0 {
 		node := scope.LocateProxmoxNode()
 
-		vm, err := scope.InfraCluster.ProxmoxClient.GetVM(ctx, node, vmID)
+		vm, err := scope.ProxmoxClient().GetVM(ctx, node, vmID)
 		if err != nil {
 			scope.Error(err, "unable to find vm")
 			return nil, ErrVMNotFound
 		}
+		if vm.Name == "" || vm.Name == placeholderVMName(vmID) {
+			scope.Info("vm is not initialized yet")
+			return nil, ErrVMNotInitialized
+		}
 		if vm.Name != scope.ProxmoxMachine.GetName() {
-			scope.Error(err, "vm is not initialized yet")
+			if vmIDCollisionIsRecoverable(scope) {
+				return nil, fmt.Errorf("vmid %d resolves to VM %q, expected %q: %w",
+					vmID, vm.Name, scope.ProxmoxMachine.GetName(), ErrVMIDCollision)
+			}
+			scope.Info("vm is not initialized yet")
 			return nil, ErrVMNotInitialized
 		}
 		return vm, nil
@@ -80,13 +102,13 @@ func updateVMLocation(ctx context.Context, s *scope.MachineScope) error {
 
 	// We are looking for a machine with the ID and check if the name matches.
 	// Then we have to update the node in the machine and cluster status.
-	rsc, err := s.InfraCluster.ProxmoxClient.FindVMResource(ctx, uint64(vmID))
+	rsc, err := s.ProxmoxClient().FindVMResource(ctx, uint64(vmID))
 	if err != nil {
 		return err
 	}
 
 	// find the VM, to make sure the vm config is up-to-date.
-	vm, err := s.InfraCluster.ProxmoxClient.GetVM(ctx, rsc.Node, vmID)
+	vm, err := s.ProxmoxClient().GetVM(ctx, rsc.Node, vmID)
 	if err != nil {
 		return errors.Wrapf(err, "unable to find vm with id %d", rsc.VMID)
 	}
@@ -97,7 +119,7 @@ func updateVMLocation(ctx context.Context, s *scope.MachineScope) error {
 	// It might happen that even when a task is already finished,
 	// we still have to wait until we can get the correct
 	// information for a particular resource.
-	if vm.VirtualMachineConfig.Name == "" {
+	if vm.VirtualMachineConfig.Name == "" || vm.VirtualMachineConfig.Name == placeholderVMName(vmID) {
 		return errors.New("vm exists but does not have a name yet")
 	}
 
@@ -105,7 +127,10 @@ func updateVMLocation(ctx context.Context, s *scope.MachineScope) error {
 	// Proxmox machine, we need to stop right there.
 	machineName := s.ProxmoxMachine.GetName()
 	if vm.VirtualMachineConfig.Name != machineName {
-		err := fmt.Errorf("expected VM name to match %q but it was %q", vm.Name, machineName)
+		err := fmt.Errorf("expected VM name to match %q but it was %q", machineName, vm.VirtualMachineConfig.Name)
+		if vmIDCollisionIsRecoverable(s) {
+			return fmt.Errorf("%w: %v", ErrVMIDCollision, err)
+		}
 		conditions.Set(s.ProxmoxMachine, metav1.Condition{
 			Type:    infrav1.ProxmoxMachineVirtualMachineProvisionedCondition,
 			Status:  metav1.ConditionFalse,
@@ -122,6 +147,7 @@ func updateVMLocation(ctx context.Context, s *scope.MachineScope) error {
 	updated := s.InfraCluster.ProxmoxCluster.UpdateNodeLocation(
 		machineName,
 		vm.Node,
+		s.Zone(),
 		util.IsControlPlaneMachine(s.Machine),
 	)
 
@@ -130,4 +156,23 @@ func updateVMLocation(ctx context.Context, s *scope.MachineScope) error {
 	}
 
 	return nil
+}
+
+func recoverFromVMIDCollision(s *scope.MachineScope, cause error) error {
+	s.InfraCluster.ProxmoxCluster.RemoveNodeLocation(s.Name(), util.IsControlPlaneMachine(s.Machine))
+	if err := s.InfraCluster.PatchObject(); err != nil {
+		return errors.Wrap(err, "failed to release stale VM node location")
+	}
+
+	s.ProxmoxMachine.Spec.VirtualMachineID = nil
+	s.ProxmoxMachine.Status.ProxmoxNode = nil
+	delete(s.ProxmoxMachine.Annotations, vmIDAllocatedByControllerAnnotation)
+	conditions.Set(s.ProxmoxMachine, metav1.Condition{
+		Type:    infrav1.ProxmoxMachineVirtualMachineProvisionedCondition,
+		Status:  metav1.ConditionFalse,
+		Reason:  infrav1.ProxmoxMachineVirtualMachineProvisionedCloningReason,
+		Message: cause.Error(),
+	})
+
+	return cause
 }

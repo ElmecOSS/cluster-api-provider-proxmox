@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -148,6 +149,54 @@ type ZoneConfigSpec struct {
 	// +listType=set
 	// +kubebuilder:validation:MinItems=1
 	DNSServers []string `json:"dnsServers,omitempty"`
+
+	// nodes specifies the Proxmox nodes that belong to this zone.
+	// When set, machines assigned to this failure domain will only
+	// be placed on these nodes.
+	// +optional
+	// +listType=set
+	Nodes []string `json:"nodes,omitempty"`
+
+	// controlPlaneEligible indicates whether control plane machines may be
+	// placed in this zone. Defaults to true when not set.
+	// +optional
+	ControlPlaneEligible *bool `json:"controlPlaneEligible,omitempty"`
+
+	// credentialsRef is a reference to a Secret that contains the Proxmox API
+	// credentials (keys: url, token, secret; optional: insecure, root_ca) for
+	// the Proxmox cluster backing this zone. When not set, the cluster-level
+	// credentials are used and behavior is identical to a single-endpoint
+	// setup. If no namespace is provided, the namespace of the ProxmoxCluster
+	// will be used.
+	// +optional
+	CredentialsRef *corev1.SecretReference `json:"credentialsRef,omitempty"`
+
+	// templateSource overrides the machine template source for machines
+	// placed in this zone. This is required in practice when the zone is
+	// backed by a different Proxmox cluster, because templates cannot be
+	// cloned across Proxmox clusters. When not set, the machine's own
+	// sourceNode/templateID/templateSelector are used. The override is total:
+	// zone and machine template sources are never merged.
+	//
+	// Completeness (templateSelector, or templateID with sourceNode) is
+	// enforced by the CEL rule on the TemplateSource type; stricter
+	// field-level XOR rules exceed the CEL cost budget inside a list item.
+	// +optional
+	// +structType=atomic
+	TemplateSource *TemplateSource `json:"templateSource,omitempty,omitzero"`
+
+	// schedulerHints overrides the cluster-level scheduler hints for machines
+	// placed in this zone. Zones are often backed by hosts with different core
+	// counts or memory, and a single cluster-wide adjustment cannot describe
+	// both.
+	//
+	// The override is total: zone and cluster hints are never merged, matching
+	// how templateSource behaves. A zone that sets only one field therefore
+	// loses the cluster values for the others and falls back to the built-in
+	// defaults, so spell out every field the zone needs.
+	// +optional
+	// +structType=atomic
+	SchedulerHints *SchedulerHints `json:"schedulerHints,omitempty,omitzero"`
 }
 
 // IPConfigSpec contains information about available IP config.
@@ -180,11 +229,42 @@ type SchedulerHints struct {
 	// memoryAdjustment allows to adjust a node's memory by a given percentage.
 	// For example, setting it to 300 allows to allocate 300% of a host's memory for VMs,
 	// and setting it to 95 limits memory allocation to 95% of a host's memory.
-	// Setting it to 0 entirely disables scheduling memory constraints.
+	// A value below 100 is a real ceiling: a node that has handed out its share
+	// scores as full even though the host still has memory free.
+	// Setting it to 0 entirely disables scheduling memory constraints, both the
+	// hard-fit check and the contribution to the score.
 	// By default 100% of a node's memory will be used for allocation.
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	MemoryAdjustment *int64 `json:"memoryAdjustment,omitempty"`
+
+	// cpuAdjustment allows to adjust a node's CPU capacity by a given percentage.
+	// For example, setting it to 300 allows allocating 300% of a host's CPU cores for VMs (3:1 overcommit),
+	// and setting it to 95 limits CPU allocation to 95% of the physical core count.
+	// Setting it to 0 entirely disables scheduling CPU constraints (default).
+	// When set to a non-zero value, CPU becomes a hard-fit constraint and a scoring
+	// dimension alongside memory; see memoryTolerance and cpuTolerance for tuning.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	CPUAdjustment *int64 `json:"cpuAdjustment,omitempty"`
+
+	// memoryTolerance expresses how acceptable it is to saturate memory on a node,
+	// in [0, 100]. Lower values make the scheduler more protective of memory.
+	// It weighs memory against CPU, so it only changes a decision when
+	// cpuAdjustment > 0 — except at 100, which drops memory from the score
+	// whether or not CPU is enabled. Defaults to 0.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +optional
+	MemoryTolerance *int64 `json:"memoryTolerance,omitempty"`
+
+	// cpuTolerance expresses how acceptable it is to saturate CPU on a node,
+	// in [0, 100]. Lower values make the scheduler more protective of CPU.
+	// Only used when cpuAdjustment > 0. Defaults to 100.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +optional
+	CPUTolerance *int64 `json:"cpuTolerance,omitempty"`
 }
 
 // GetMemoryAdjustment returns the memory adjustment percentage to use within the scheduler.
@@ -196,6 +276,43 @@ func (sh *SchedulerHints) GetMemoryAdjustment() int64 {
 	}
 
 	return memoryAdjustment
+}
+
+// GetCPUAdjustment returns the CPU adjustment percentage to use within the scheduler.
+// Returns 0 by default, which disables CPU-aware scheduling (backward compatible).
+func (sh *SchedulerHints) GetCPUAdjustment() int64 {
+	cpuAdjustment := int64(0)
+
+	if sh != nil {
+		cpuAdjustment = ptr.Deref(sh.CPUAdjustment, 0)
+	}
+
+	return cpuAdjustment
+}
+
+// GetMemoryTolerance returns the memory saturation tolerance (0..100) used by the
+// tolerance-weighted scheduler. Defaults to 0, i.e. memory is fully protected.
+func (sh *SchedulerHints) GetMemoryTolerance() int64 {
+	memoryTolerance := int64(0)
+
+	if sh != nil {
+		memoryTolerance = ptr.Deref(sh.MemoryTolerance, 0)
+	}
+
+	return memoryTolerance
+}
+
+// GetCPUTolerance returns the CPU saturation tolerance (0..100) used by the
+// tolerance-weighted scheduler. Defaults to 100, i.e. CPU is only a hard-fit
+// constraint and does not influence scoring unless the operator opts in.
+func (sh *SchedulerHints) GetCPUTolerance() int64 {
+	cpuTolerance := int64(100)
+
+	if sh != nil {
+		cpuTolerance = ptr.Deref(sh.CPUTolerance, 100)
+	}
+
+	return cpuTolerance
 }
 
 // ProxmoxClusterStatus defines the observed state of a ProxmoxCluster.
@@ -232,6 +349,14 @@ type ProxmoxClusterStatus struct {
 	// for different machines.
 	// +optional
 	NodeLocations *NodeLocations `json:"nodeLocations,omitempty"`
+
+	// failureDomains is a slice of failure domains synced from zone configurations.
+	// This field is part of the Cluster API contract and is used by KubeadmControlPlane
+	// to distribute control plane machines across zones.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	FailureDomains []clusterv1.FailureDomain `json:"failureDomains,omitempty"`
 }
 
 // ProxmoxClusterInitializationStatus provides observations of the ProxmoxCluster initialization process.
@@ -369,12 +494,12 @@ func (c *ProxmoxCluster) AddInClusterZoneRef(pool client.Object) {
 	}
 
 	index := slices.IndexFunc(c.Status.InClusterZoneRef, func(r InClusterZoneRef) bool {
-		return *r.Zone == zone
+		return ptr.Deref(r.Zone, "") == zone
 	})
 
 	if index < 0 {
 		c.Status.InClusterZoneRef = append(c.Status.InClusterZoneRef, InClusterZoneRef{Zone: &zone})
-		index = len(c.Status.InClusterZoneRef)
+		index = len(c.Status.InClusterZoneRef) - 1
 	}
 
 	poolRef := corev1.LocalObjectReference{Name: pool.GetName()}
@@ -457,10 +582,11 @@ func (c *ProxmoxCluster) RemoveNodeLocation(machineName string, isControlPlane b
 // If the node location does not exist, it will be added.
 //
 // The function returns true if the value was added or updated, otherwise false.
-func (c *ProxmoxCluster) UpdateNodeLocation(machineName, node string, isControlPlane bool) bool {
+func (c *ProxmoxCluster) UpdateNodeLocation(machineName, node string, zone Zone, isControlPlane bool) bool {
 	if !c.HasMachine(machineName, isControlPlane) {
 		loc := NodeLocation{
 			Node:    node,
+			Zone:    zone,
 			Machine: corev1.LocalObjectReference{Name: machineName},
 		}
 		c.AddNodeLocation(loc, isControlPlane)
@@ -474,12 +600,18 @@ func (c *ProxmoxCluster) UpdateNodeLocation(machineName, node string, isControlP
 
 	for i, loc := range locations {
 		if loc.Machine.Name == machineName {
+			updated := false
 			if loc.Node != node {
 				locations[i].Node = node
-				return true
+				updated = true
+			}
+			// repair a missing zone: earlier versions dropped it on update.
+			if loc.Zone == nil && zone != nil {
+				locations[i].Zone = zone
+				updated = true
 			}
 
-			return false
+			return updated
 		}
 	}
 
@@ -521,6 +653,35 @@ func (c *ProxmoxCluster) addNodeLocation(loc NodeLocation, isControlPlane bool) 
 	}
 
 	c.Status.NodeLocations.Workers = append(c.Status.NodeLocations.Workers, loc)
+}
+
+// GetZoneNodes returns the Proxmox node names for a given zone name.
+// Returns nil if the zone is not found or has no explicit nodes configured.
+func (c *ProxmoxCluster) GetZoneNodes(zoneName string) []string {
+	for _, zc := range c.Spec.ZoneConfigs {
+		if ptr.Deref(zc.Zone, "") == zoneName {
+			return zc.Nodes
+		}
+	}
+
+	return nil
+}
+
+// GetZoneDNSServers returns the DNS servers configured for a given zone.
+// Returns nil if the zone is not found or has no DNS servers configured.
+func (c *ProxmoxCluster) GetZoneDNSServers(zone Zone) []string {
+	zoneName := ptr.Deref(zone, "")
+	if zoneName == "" {
+		return nil
+	}
+
+	for _, zc := range c.Spec.ZoneConfigs {
+		if ptr.Deref(zc.Zone, "") == zoneName {
+			return zc.DNSServers
+		}
+	}
+
+	return nil
 }
 
 func init() {

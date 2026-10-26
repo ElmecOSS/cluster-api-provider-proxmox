@@ -148,7 +148,7 @@ func TestProxmoxAPIClient_GetReservableMemoryBytes(t *testing.T) {
 			httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/lxc`,
 				newJSONResponder(200, proxmox.Containers{}))
 
-			reservable, err := client.GetReservableMemoryBytes(context.Background(), "test", test.nodeMemoryAdjustment)
+			reservable, _, err := client.GetReservableMemoryBytes(context.Background(), "test", test.nodeMemoryAdjustment)
 			require.NoError(t, err)
 			require.Equal(t, test.expect, reservable)
 		})
@@ -158,7 +158,7 @@ func TestProxmoxAPIClient_GetReservableMemoryBytes(t *testing.T) {
 		client := newTestClient(t)
 		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/status`,
 			newJSONResponder(401, "Forbidden"))
-		reservable, err := client.GetReservableMemoryBytes(context.Background(), "test", 0)
+		reservable, _, err := client.GetReservableMemoryBytes(context.Background(), "test", 0)
 		require.Error(t, err)
 		require.Equal(t, uint64(0), reservable)
 		require.Equal(t,
@@ -172,7 +172,7 @@ func TestProxmoxAPIClient_GetReservableMemoryBytes(t *testing.T) {
 			newJSONResponder(200, proxmox.Node{Memory: proxmox.Memory{Total: 30}, Name: "test"}))
 		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/qemu`,
 			newJSONResponder(401, nil))
-		reservable, err := client.GetReservableMemoryBytes(context.Background(), "test", 1)
+		reservable, _, err := client.GetReservableMemoryBytes(context.Background(), "test", 1)
 		require.Error(t, err)
 		require.Equal(t, uint64(0), reservable)
 		require.Equal(t,
@@ -387,6 +387,8 @@ func TestProxmoxAPIClient_FindVMTemplateByTags(t *testing.T) {
 		&proxmox.ClusterResource{VMID: 402, Name: "flatcar-k8s-v1.33.9", Node: "capmox03", Tags: "capmox;flatcar;staging;v1.33.9", Template: uint64(1)},
 		&proxmox.ClusterResource{VMID: 403, Name: "flatcar-k8s-v1.34.5", Node: "capmox03", Tags: "capic;flatcar;devel;v1.34.5", Template: uint64(1)},
 		&proxmox.ClusterResource{VMID: 404, Name: "flatcar-k8s-v1.35.2", Node: "capmox03", Tags: "capmox;flatcar;devel;v1.35.1", Template: uint64(1)},
+		&proxmox.ClusterResource{VMID: 501, Name: "rocky-k8s-v1.33.0-staging", Node: "capmox03", Tags: "rocky;r9;staging;v1.33.0", Template: uint64(1)},
+		&proxmox.ClusterResource{VMID: 502, Name: "rocky-k8s-v1.33.0", Node: "capmox03", Tags: "rocky;r9;v1.33.0", Template: uint64(1)},
 	}
 	tests := []struct {
 		name           string
@@ -426,7 +428,7 @@ func TestProxmoxAPIClient_FindVMTemplateByTags(t *testing.T) {
 			vmTags:         nil,
 			matchPolicy:    infrav1.TemplateMatchPolicySubset,
 			fails:          true,
-			err:            "VM template not found: found 9 VM templates with tags \"\"",
+			err:            "VM template not found: found 11 VM templates with tags \"\"",
 			vmTemplateNode: "capmox01",
 			vmTemplateID:   201,
 		},
@@ -500,6 +502,16 @@ func TestProxmoxAPIClient_FindVMTemplateByTags(t *testing.T) {
 			err:            "",
 			vmTemplateNode: "capmox03",
 			vmTemplateID:   401,
+		},
+		{
+			name:           "find-template-best-subset-worse-match-first",
+			http:           []int{200, 200},
+			vmTags:         []string{"rocky", "r9"},
+			matchPolicy:    infrav1.TemplateMatchPolicyBest,
+			fails:          false,
+			err:            "",
+			vmTemplateNode: "capmox03",
+			vmTemplateID:   502,
 		},
 		{
 			name:           "find-multiple-templates-best-subset",
@@ -739,4 +751,167 @@ func TestProxmoxAPIClient_CloudInitStatus(t *testing.T) {
 			require.Equal(t, test.running, running)
 		})
 	}
+}
+
+func TestProxmoxAPIClient_GetReservableCPUCores(t *testing.T) {
+	// A guest as the /nodes/{node}/qemu and /lxc list endpoints return it.
+	// The structs cannot be used directly here: proxmox.VirtualMachine always
+	// decodes as a template when built in Go, so the JSON is spelled out.
+	guest := func(name string, cpus int, status string, template bool) map[string]any {
+		g := map[string]any{
+			"name": name, "cpus": cpus, "status": status, "vmid": 1000 + cpus,
+			"maxmem": 0, "mem": 0, "uptime": 0, "disk": 0, "cpu": 0,
+			"maxdisk": 0, "netin": 0, "netout": 0, "diskread": 0, "diskwrite": 0,
+		}
+		if template {
+			g["template"] = 1
+		}
+		return g
+	}
+
+	tests := []struct {
+		name              string
+		totalCPUs         int
+		cpuAdjustment     int64
+		vms               []any
+		containers        []any
+		expectAvailable   int
+		expectAllocatable int
+	}{
+		{
+			name:          "templates excluded, stopped guests still reserve",
+			totalCPUs:     32,
+			cpuAdjustment: 100,
+			vms: []any{
+				guest("running-worker", 4, "running", false),
+				guest("stopped-worker", 2, "stopped", false),
+				guest("golden-image", 8, "stopped", true),
+			},
+			expectAvailable:   26, // 32 - 4 - 2, the template is not charged
+			expectAllocatable: 32,
+		},
+		{
+			name:              "containers count too",
+			totalCPUs:         32,
+			cpuAdjustment:     100,
+			vms:               []any{guest("worker", 4, "running", false)},
+			containers:        []any{guest("ct", 2, "running", false)},
+			expectAvailable:   26,
+			expectAllocatable: 32,
+		},
+		{
+			name:              "overcommit widens what is allocatable",
+			totalCPUs:         32,
+			cpuAdjustment:     300,
+			vms:               []any{guest("worker", 6, "running", false)},
+			expectAvailable:   90, // 32*3 - 6
+			expectAllocatable: 96,
+		},
+		{
+			name:              "underprovisioning truncates, it does not round",
+			totalCPUs:         64,
+			cpuAdjustment:     95,
+			expectAvailable:   60, // 64*95/100 is 60.8
+			expectAllocatable: 60,
+		},
+		{
+			name:              "an overbooked node reports no headroom, never a negative one",
+			totalCPUs:         4,
+			cpuAdjustment:     100,
+			vms:               []any{guest("greedy", 10, "running", false)},
+			expectAvailable:   0,
+			expectAllocatable: 4,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := newTestClient(t)
+			httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/status`,
+				newJSONResponder(200, proxmox.Node{CPUInfo: proxmox.CPUInfo{CPUs: test.totalCPUs}, Name: "test"}))
+			httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/qemu`,
+				newJSONResponder(200, test.vms))
+			httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/lxc`,
+				newJSONResponder(200, test.containers))
+
+			available, allocatable, err := client.GetReservableCPUCores(context.Background(), "test", test.cpuAdjustment)
+			require.NoError(t, err)
+			require.Equal(t, test.expectAvailable, available, "available")
+			require.Equal(t, test.expectAllocatable, allocatable, "allocatable")
+		})
+	}
+
+	t.Run("disabled, the guest lists are never fetched", func(t *testing.T) {
+		// Only /status is registered: httpmock fails any other call, so a
+		// successful result proves the guests were not listed.
+		client := newTestClient(t)
+		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/status`,
+			newJSONResponder(200, proxmox.Node{CPUInfo: proxmox.CPUInfo{CPUs: 32}, Name: "test"}))
+
+		available, allocatable, err := client.GetReservableCPUCores(context.Background(), "test", 0)
+		require.NoError(t, err)
+		require.Equal(t, 3200, available)
+		require.Equal(t, 3200, allocatable)
+	})
+
+	t.Run("fail to access endpoint", func(t *testing.T) {
+		client := newTestClient(t)
+		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/status`,
+			newJSONResponder(401, "Forbidden"))
+
+		available, allocatable, err := client.GetReservableCPUCores(context.Background(), "test", 100)
+		require.EqualError(t, err, "cannot find node with name test: not authorized to access endpoint")
+		require.Zero(t, available)
+		require.Zero(t, allocatable)
+	})
+
+	t.Run("fail to list VMs", func(t *testing.T) {
+		client := newTestClient(t)
+		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/status`,
+			newJSONResponder(200, proxmox.Node{CPUInfo: proxmox.CPUInfo{CPUs: 32}, Name: "test"}))
+		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/qemu`,
+			newJSONResponder(401, nil))
+
+		_, _, err := client.GetReservableCPUCores(context.Background(), "test", 100)
+		require.ErrorContains(t, err, "cannot list vms for node test")
+	})
+
+	t.Run("fail to list containers", func(t *testing.T) {
+		client := newTestClient(t)
+		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/status`,
+			newJSONResponder(200, proxmox.Node{CPUInfo: proxmox.CPUInfo{CPUs: 32}, Name: "test"}))
+		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/qemu`,
+			newJSONResponder(200, []any{}))
+		httpmock.RegisterResponder(http.MethodGet, `=~/nodes/test/lxc`,
+			newJSONResponder(401, nil))
+
+		_, _, err := client.GetReservableCPUCores(context.Background(), "test", 100)
+		require.ErrorContains(t, err, "cannot list containers for node test")
+	})
+}
+
+// A VM being cloned onto a node other than the template's has no config file
+// there until the clone finishes, and Proxmox reports that with the same
+// "does not exist" it uses for a VM that never existed. The cluster-wide ID
+// check has already said the ID is taken, so this must not read as "gone":
+// callers key the removal of their finalizer on that distinction.
+func TestProxmoxAPIClient_DeleteVMMidCloneIsNotGone(t *testing.T) {
+	client := newTestClient(t)
+
+	httpmock.RegisterResponder(http.MethodGet, `=~/nodes/target/status`,
+		newJSONResponder(200, proxmox.Node{Name: "target"}))
+	httpmock.RegisterResponder(http.MethodGet, `=~/cluster/status`,
+		newJSONResponder(200, proxmox.NodeStatuses{{Name: "target"}, {Name: "source"}}))
+	// The ID is taken cluster-wide: the clone is in flight.
+	httpmock.RegisterResponder(http.MethodGet, `=~/cluster/nextid`,
+		newJSONResponder(400, "VM 123 already exists"))
+	// ...but its config has not landed on the destination node yet.
+	httpmock.RegisterResponder(http.MethodGet, `=~/nodes/target/qemu/123/status/current`,
+		newJSONResponder(500, "Configuration file 'nodes/target/qemu-server/123.conf' does not exist"))
+
+	task, err := client.DeleteVM(context.Background(), "target", 123)
+
+	require.Nil(t, task)
+	require.ErrorIs(t, err, ErrVMNotOnNode)
+	require.NotErrorIs(t, err, ErrVMIDFree)
 }

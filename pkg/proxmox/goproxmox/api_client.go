@@ -39,6 +39,12 @@ var _ capmox.Client = &APIClient{}
 // ErrVMIDFree is returned if the VMID is free.
 var ErrVMIDFree = errors.New("VMID is free")
 
+// ErrVMNotOnNode is returned when the cluster still has a VMID registered but
+// the VM cannot be read on the node it was expected on. It is deliberately not
+// an "is gone" answer: the VM exists somewhere, so a caller holding a finalizer
+// has to keep holding it.
+var ErrVMNotOnNode = errors.New("VM is registered on the cluster but not readable on that node")
+
 // APIClient Proxmox API client object.
 type APIClient struct {
 	*proxmox.Client
@@ -198,7 +204,11 @@ NEXT_VM:
 			if distance > bestDistance {
 				continue NEXT_VM
 			}
-			bestDistance = distance
+			if distance < bestDistance {
+				// a strictly better match invalidates all previous matches.
+				bestDistance = distance
+				matches = 0
+			}
 		}
 
 		matches++
@@ -238,7 +248,14 @@ func (c *APIClient) DeleteVM(ctx context.Context, nodeName string, vmID int64) (
 
 	vm, err := node.VirtualMachine(ctx, int(vmID))
 	if err != nil {
-		return nil, fmt.Errorf("cannot find vm with id %d: %w", vmID, err)
+		// CheckID just reported the ID as taken, so the VM exists on this
+		// cluster. Proxmox answers for a config file that is not on this node
+		// with the same "does not exist" it uses for a VM that never existed,
+		// and a clone onto a node other than the template's writes that config
+		// only once it completes. Letting the two look alike means a machine
+		// deleted mid-clone drops its finalizer and the VM finishes cloning
+		// with nothing left to manage it.
+		return nil, fmt.Errorf("%w: id %d on node %s: %w", ErrVMNotOnNode, vmID, nodeName, err)
 	}
 
 	if vm.IsRunning() {
@@ -277,23 +294,26 @@ func (c *APIClient) GetTask(ctx context.Context, upID string) (*proxmox.Task, er
 	return task, nil
 }
 
-// GetReservableMemoryBytes returns the memory that can be reserved by a new VM, in bytes.
-func (c *APIClient) GetReservableMemoryBytes(ctx context.Context, nodeName string, nodeMemoryAdjustment int64) (uint64, error) {
+// GetReservableMemoryBytes returns the memory that can be reserved by a new VM (in bytes),
+// along with the total allocatable memory (after applying nodeMemoryAdjustment).
+func (c *APIClient) GetReservableMemoryBytes(ctx context.Context, nodeName string, nodeMemoryAdjustment int64) (uint64, uint64, error) {
 	node := (&proxmox.Node{}).New(c.Client, nodeName)
 
 	if err := node.Status(ctx); err != nil {
-		return 0, fmt.Errorf("cannot find node with name %s: %w", nodeName, err)
+		return 0, 0, fmt.Errorf("cannot find node with name %s: %w", nodeName, err)
 	}
 
-	reservableMemory := uint64(float64(node.Memory.Total) / 100 * float64(nodeMemoryAdjustment))
+	allocatable := uint64(float64(node.Memory.Total) / 100 * float64(nodeMemoryAdjustment))
 
 	if nodeMemoryAdjustment == 0 {
-		return node.Memory.Total, nil
+		return node.Memory.Total, node.Memory.Total, nil
 	}
+
+	available := allocatable
 
 	vms, err := node.VirtualMachines(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("cannot list vms for node %s: %w", nodeName, err)
+		return 0, 0, fmt.Errorf("cannot list vms for node %s: %w", nodeName, err)
 	}
 
 	for _, vm := range vms {
@@ -301,27 +321,85 @@ func (c *APIClient) GetReservableMemoryBytes(ctx context.Context, nodeName strin
 		if vm.Template {
 			continue
 		}
-		if reservableMemory < vm.MaxMem {
-			reservableMemory = 0
+		if available < vm.MaxMem {
+			available = 0
 		} else {
-			reservableMemory -= vm.MaxMem
+			available -= vm.MaxMem
 		}
 	}
 
 	containers, err := node.Containers(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("cannot list containers for node %s: %w", nodeName, err)
+		return 0, 0, fmt.Errorf("cannot list containers for node %s: %w", nodeName, err)
 	}
 
 	for _, ct := range containers {
-		if reservableMemory < ct.MaxMem {
-			reservableMemory = 0
+		if available < ct.MaxMem {
+			available = 0
 		} else {
-			reservableMemory -= ct.MaxMem
+			available -= ct.MaxMem
 		}
 	}
 
-	return reservableMemory, nil
+	return available, allocatable, nil
+}
+
+// GetReservableCPUCores returns the number of CPU cores that can be reserved by a new VM,
+// along with the total allocatable cores (after applying cpuAdjustment).
+//
+// Capacity is the node's logical CPUs, that is sockets × cores × threads as
+// reported in cpuinfo.cpus, scaled by cpuAdjustment. The scaling truncates:
+// 64 cores at 95% allocate 60, not 60.8.
+//
+// Usage is the configured vCPUs of every guest on the node, containers
+// included. Templates are skipped; **stopped guests are not**. A reservation
+// is about the right to start, and a powered-off machine keeps that right, so
+// counting only what runs right now would hand out capacity twice. The same
+// reasoning already governs GetReservableMemoryBytes.
+//
+// An overbooked node reports no headroom rather than a negative one.
+func (c *APIClient) GetReservableCPUCores(ctx context.Context, nodeName string, cpuAdjustment int64) (int, int, error) {
+	node := (&proxmox.Node{}).New(c.Client, nodeName)
+
+	if err := node.Status(ctx); err != nil {
+		return 0, 0, fmt.Errorf("cannot find node with name %s: %w", nodeName, err)
+	}
+
+	totalCPUs := node.CPUInfo.CPUs
+	if cpuAdjustment == 0 {
+		// CPU constraints disabled — return a large value so it never limits scheduling.
+		return totalCPUs * 100, totalCPUs * 100, nil
+	}
+
+	allocatable := totalCPUs * int(cpuAdjustment) / 100
+	available := allocatable
+
+	vms, err := node.VirtualMachines(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("cannot list vms for node %s: %w", nodeName, err)
+	}
+
+	for _, vm := range vms {
+		if vm.Template {
+			continue
+		}
+		available -= vm.CPUs
+	}
+
+	containers, err := node.Containers(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("cannot list containers for node %s: %w", nodeName, err)
+	}
+
+	for _, ct := range containers {
+		available -= ct.CPUs
+	}
+
+	if available < 0 {
+		available = 0
+	}
+
+	return available, allocatable, nil
 }
 
 // ResizeDisk resizes a VM disk to the specified size.

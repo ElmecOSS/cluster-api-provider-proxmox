@@ -9,7 +9,7 @@ Table of contents
    * [Usage](#usage)
       * [Dependencies](#dependencies)
       * [Quick start](#quick-start)
-         * [Pre-requisites](#pre-requisites)
+         * [Pre-requisites](#prerequisites)
          * [Configuring and installing Cluster API Provider for Proxmox VE in a management cluster](#configuring-and-installing-cluster-api-provider-for-proxmox-ve-in-a-management-cluster)
          * [Create a Workload Cluster](#create-a-workload-cluster)
          * [Check the status of the cluster](#check-the-status-of-the-cluster)
@@ -123,7 +123,7 @@ To create a new cluster, you need to generate a cluster manifest.
 ```bash
 $ clusterctl generate cluster proxmox-quickstart \
     --infrastructure proxmox \
-    --kubernetes-version v1.34.8 \
+    --kubernetes-version v1.34.11 \
     --control-plane-machine-count 1 \
     --worker-machine-count 3 > cluster.yaml
 
@@ -172,6 +172,7 @@ We provide the following templates:
 | cilium loadbalancer | templates/cluster-template-cilium-load-balancer.yaml | templates/crs/cni/cilium.yaml, templates/crs/metallb.yaml |
 | external-creds      | templates/cluster-template-external-creds.yaml       |                                                           |
 | flatcar             | templates/cluster-template-flatcar.yaml              |                                                           |
+| multi-dc            | templates/cluster-template-multi-dc.yaml             | -                                                         |
 
 For more information about advanced clusters please check our [advanced setups docs](advanced-setups.md).
 
@@ -235,7 +236,7 @@ Now, you can create a cluster using the cilium flavor:
 ```bash
 $ clusterctl generate cluster proxmox-cilium \
 --infrastructure proxmox \
---kubernetes-version v1.34.8 \
+--kubernetes-version v1.34.11 \
 --control-plane-machine-count 1 \
 --worker-machine-count 3 \
 --flavor cilium > cluster.yaml
@@ -261,7 +262,7 @@ kubectl create cm $FLAVOR_NAME --from-file=data=$CRS_FILE
 ```bash
 $ clusterctl generate cluster proxmox-crs \
 --infrastructure proxmox \
---kubernetes-version v1.34.8 \
+--kubernetes-version v1.34.11 \
 --control-plane-machine-count 1 \
 --worker-machine-count 3 \
 --flavor $FLAVOR_NAME > cluster-crs.yaml
@@ -290,7 +291,7 @@ Then, you can generate a cluster manifest with the following command:
 ```shell
 $ clusterctl generate cluster flatcar-quickstart \
     --infrastructure proxmox \
-    --kubernetes-version v1.34.8 \
+    --kubernetes-version v1.34.11 \
     --control-plane-machine-count 3 \
     --worker-machine-count 3 \
     --flavor flatcar > cluster.yaml
@@ -317,7 +318,7 @@ If you need anything specific that requires a more complex setup, we recommend t
 ```
 $ clusterctl generate custom-cluster proxmox-quickstart \
     --infrastructure proxmox \
-    --kubernetes-version v1.34.8 \
+    --kubernetes-version v1.34.11 \
     --control-plane-machine-count 1 \
     --worker-machine-count 3 \
     --from ~/workspace/custom-cluster-template.yaml > custom-cluster.yaml

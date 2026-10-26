@@ -40,7 +40,9 @@ type Client interface {
 
 	GetTask(ctx context.Context, upID string) (*proxmox.Task, error)
 
-	GetReservableMemoryBytes(ctx context.Context, nodeName string, nodeMemoryAdjustment int64) (uint64, error)
+	GetReservableMemoryBytes(ctx context.Context, nodeName string, nodeMemoryAdjustment int64) (available uint64, allocatable uint64, err error)
+
+	GetReservableCPUCores(ctx context.Context, nodeName string, cpuAdjustment int64) (available int, allocatable int, err error)
 
 	ResizeDisk(ctx context.Context, vm *proxmox.VirtualMachine, disk, size string) (*proxmox.Task, error)
 
@@ -55,4 +57,8 @@ type Client interface {
 	CloudInitStatus(ctx context.Context, vm *proxmox.VirtualMachine) (bool, error)
 
 	QemuAgentStatus(ctx context.Context, vm *proxmox.VirtualMachine) error
+
+	// Version returns the Proxmox VE version of the endpoint; used as a
+	// cheap liveness probe.
+	Version(ctx context.Context) (*proxmox.Version, error)
 }

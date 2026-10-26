@@ -33,6 +33,34 @@ var _ = Describe("Controller Test", func() {
 	g := NewWithT(GinkgoT())
 
 	Context("create proxmox machine", func() {
+		// A schema whose maximum does not fit its own format is rejected by
+		// the API server for every object that sets the field, so a VRF with
+		// an ordinary routing table could not be created at all. The sibling
+		// priority field is an int64 and may keep the u32 maximum; table is
+		// an int32 and may not.
+		It("should accept a vrf with an ordinary routing table", func() {
+			machine := validProxmoxMachine("test-machine-vrf")
+			machine.Spec.Network.VRFs = []infrav1.VRFDevice{{
+				Name:       "vrf-blue",
+				Table:      100,
+				Interfaces: []infrav1.NetName{"net0"},
+			}}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &machine)).To(Succeed())
+		})
+
+		// A routing table ID is written verbatim into the guest's network
+		// configuration, so a negative one has to be refused here rather than
+		// inside a machine that then comes up with no networking.
+		It("should disallow a negative routing table", func() {
+			machine := validProxmoxMachine("test-machine-neg-table")
+			machine.Spec.Network.NetworkDevices[0].Routes = []infrav1.RouteSpec{{
+				To:    new("10.0.0.0/8"),
+				Table: new(int32(-5)),
+			}}
+			g.Expect(k8sClient.Create(testEnv.GetContext(), &machine)).
+				To(MatchError(ContainSubstring("table in body should be greater than or equal to 0")))
+		})
+
 		It("should disallow invalid network mtu", func() {
 			machine := invalidMTUProxmoxMachine("test-machine")
 			g.Expect(k8sClient.Create(testEnv.GetContext(), &machine)).To(MatchError(ContainSubstring("invalid MTU value")))

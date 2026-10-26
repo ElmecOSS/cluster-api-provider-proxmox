@@ -18,8 +18,10 @@ package scope
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +34,7 @@ import (
 
 	infrav1 "github.com/ionos-cloud/cluster-api-provider-proxmox/api/v1alpha2"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/kubernetes/ipam"
+	capmox "github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox/goproxmox"
 	"github.com/ionos-cloud/cluster-api-provider-proxmox/pkg/proxmox/proxmoxtest"
 )
@@ -135,6 +138,99 @@ func TestNewClusterScope_SetupProxmoxClient(t *testing.T) {
 
 	_, err = NewClusterScope(params)
 	require.Error(t, err)
+}
+
+// stubFactory returns pre-seeded clients per secret name; unknown secrets
+// error, mimicking an unreachable endpoint.
+type stubFactory struct {
+	clients map[string]capmox.Client
+}
+
+func (f *stubFactory) GetOrCreate(_ context.Context, _ logr.Logger, secret *corev1.Secret) (capmox.Client, error) {
+	if c, ok := f.clients[secret.GetName()]; ok {
+		return c, nil
+	}
+	return nil, errors.New("no stub client for secret " + secret.GetName())
+}
+
+func (f *stubFactory) Evict(_, name string) {
+	delete(f.clients, name)
+}
+
+func TestClientForZone(t *testing.T) {
+	k8sClient := getFakeClient(t)
+
+	require.NoError(t, k8sClient.Create(context.Background(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "zone-b-secret", Namespace: "default"},
+		StringData: map[string]string{"url": "https://dc-b:8006", "token": "t", "secret": "s"},
+	}))
+	require.NoError(t, k8sClient.Create(context.Background(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "zone-c-secret", Namespace: "default"},
+		StringData: map[string]string{"url": "https://dc-c:8006", "token": "t", "secret": "s"},
+	}))
+
+	clusterClient := proxmoxtest.NewMockClient(t)
+	zoneBClient := proxmoxtest.NewMockClient(t)
+
+	proxmoxCluster := &infrav1.ProxmoxCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "proxmoxcluster", Namespace: "default"},
+		Spec: infrav1.ProxmoxClusterSpec{
+			ZoneConfigs: []infrav1.ZoneConfigSpec{
+				{Zone: new("zone-a"), DNSServers: []string{"1.1.1.1"}},
+				{Zone: new("zone-b"), DNSServers: []string{"1.1.1.1"}, CredentialsRef: &corev1.SecretReference{Name: "zone-b-secret"}},
+				{Zone: new("zone-c"), DNSServers: []string{"1.1.1.1"}, CredentialsRef: &corev1.SecretReference{Name: "zone-c-secret"}},
+				{Zone: new("zone-d"), DNSServers: []string{"1.1.1.1"}, CredentialsRef: &corev1.SecretReference{Name: "no-such-secret"}},
+			},
+		},
+	}
+
+	// clusterClient plays the manager-wide env-var client here: zone
+	// credentials must win over it.
+	clusterScope, err := NewClusterScope(ClusterScopeParams{
+		Client:         k8sClient,
+		Cluster:        &clusterv1.Cluster{},
+		ProxmoxCluster: proxmoxCluster,
+		ProxmoxClient:  clusterClient,
+		ClientFactory:  &stubFactory{clients: map[string]capmox.Client{"zone-b-secret": zoneBClient}},
+		IPAMHelper:     &ipam.Helper{},
+	})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// nil zone (default) → cluster client.
+	c, err := clusterScope.ClientForZone(ctx, nil)
+	require.NoError(t, err)
+	require.Same(t, clusterClient, c)
+
+	// zone without credentialsRef → cluster client.
+	c, err = clusterScope.ClientForZone(ctx, new("zone-a"))
+	require.NoError(t, err)
+	require.Same(t, clusterClient, c)
+
+	// zone with credentialsRef → zone client, even though the cluster
+	// client is set.
+	c, err = clusterScope.ClientForZone(ctx, new("zone-b"))
+	require.NoError(t, err)
+	require.Same(t, zoneBClient, c)
+
+	// zone whose client construction fails → error, no fallback.
+	_, err = clusterScope.ClientForZone(ctx, new("zone-c"))
+	require.ErrorContains(t, err, "zone-c")
+
+	// zone whose secret is missing → error, no fallback.
+	_, err = clusterScope.ClientForZone(ctx, new("zone-d"))
+	require.ErrorContains(t, err, "failed to get credentials secret")
+
+	// unconfigured zone → fail closed.
+	_, err = clusterScope.ClientForZone(ctx, new("zone-gone"))
+	require.ErrorContains(t, err, `zone "zone-gone" not configured`)
+
+	// the implicit "default" zone name always maps to the cluster client,
+	// even without a matching zoneConfig entry.
+	c, err = clusterScope.ClientForZone(ctx, new("default"))
+	require.NoError(t, err)
+	require.Same(t, clusterClient, c)
 }
 
 func TestListProxmoxMachinesForCluster(t *testing.T) {

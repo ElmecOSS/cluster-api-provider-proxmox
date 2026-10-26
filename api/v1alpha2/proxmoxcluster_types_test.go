@@ -30,20 +30,24 @@ import (
 )
 
 func TestUpdateNodeLocation(t *testing.T) {
+	zone1 := "zone1"
+
 	cl := ProxmoxCluster{
 		Status: ProxmoxClusterStatus{},
 	}
 
-	res := cl.UpdateNodeLocation("new", "n1", false)
+	res := cl.UpdateNodeLocation("new", "n1", &zone1, false)
 	require.NotNil(t, cl.Status.NodeLocations)
 	require.Len(t, cl.Status.NodeLocations.Workers, 1)
 	require.True(t, res)
+	require.Equal(t, zone1, *cl.Status.NodeLocations.Workers[0].Zone)
 
 	locs := &NodeLocations{
 		Workers: []NodeLocation{
 			{
 				Machine: corev1.LocalObjectReference{Name: "m1"},
 				Node:    "n1",
+				Zone:    &zone1,
 			},
 			{
 				Machine: corev1.LocalObjectReference{Name: "m2"},
@@ -58,19 +62,25 @@ func TestUpdateNodeLocation(t *testing.T) {
 
 	cl.Status.NodeLocations = locs
 
-	res = cl.UpdateNodeLocation("m1", "n2", false)
+	res = cl.UpdateNodeLocation("m1", "n2", &zone1, false)
 	require.True(t, res)
 	require.Len(t, cl.Status.NodeLocations.Workers, 3)
 	require.Equal(t, cl.Status.NodeLocations.Workers[0].Node, "n2")
+	require.Equal(t, zone1, *cl.Status.NodeLocations.Workers[0].Zone)
 
-	res = cl.UpdateNodeLocation("m4", "n4", false)
+	res = cl.UpdateNodeLocation("m4", "n4", nil, false)
 	require.True(t, res)
 	require.Len(t, cl.Status.NodeLocations.Workers, 4)
 	require.Equal(t, cl.Status.NodeLocations.Workers[3].Node, "n4")
 
-	res = cl.UpdateNodeLocation("m2", "n2", false)
+	res = cl.UpdateNodeLocation("m2", "n2", nil, false)
 	require.False(t, res)
 	require.Len(t, cl.Status.NodeLocations.Workers, 4)
+
+	// a missing zone is repaired even when the node did not change.
+	res = cl.UpdateNodeLocation("m2", "n2", &zone1, false)
+	require.True(t, res)
+	require.Equal(t, zone1, *cl.Status.NodeLocations.Workers[1].Zone)
 }
 
 func defaultCluster() *ProxmoxCluster {
@@ -208,11 +218,45 @@ func TestRemoveNodeLocation(t *testing.T) {
 	require.Len(t, cl.Status.NodeLocations.Workers, 2)
 	require.Equal(t, cl.Status.NodeLocations.Workers[0].Node, "n2")
 
-	cl.UpdateNodeLocation("m4", "n4", true)
+	cl.UpdateNodeLocation("m4", "n4", nil, true)
 	require.Len(t, cl.Status.NodeLocations.ControlPlane, 1)
 
 	cl.RemoveNodeLocation("m4", true)
 	require.Len(t, cl.Status.NodeLocations.ControlPlane, 0)
+}
+
+func TestGetZoneNodes(t *testing.T) {
+	cl := &ProxmoxCluster{
+		Spec: ProxmoxClusterSpec{
+			ZoneConfigs: []ZoneConfigSpec{
+				{
+					Zone:  new("zone-a"),
+					Nodes: []string{"pve1", "pve2"},
+				},
+				{
+					Zone: new("zone-b"),
+					// No nodes explicitly set.
+				},
+			},
+		},
+	}
+
+	// Zone found with nodes.
+	nodes := cl.GetZoneNodes("zone-a")
+	require.Equal(t, []string{"pve1", "pve2"}, nodes)
+
+	// Zone found without nodes.
+	nodes = cl.GetZoneNodes("zone-b")
+	require.Nil(t, nodes)
+
+	// Zone not found.
+	nodes = cl.GetZoneNodes("zone-c")
+	require.Nil(t, nodes)
+
+	// Empty ZoneConfigs.
+	empty := &ProxmoxCluster{}
+	nodes = empty.GetZoneNodes("anything")
+	require.Nil(t, nodes)
 }
 
 func TestSetInClusterIPPoolRef(t *testing.T) {
@@ -238,4 +282,48 @@ func TestSetInClusterIPPoolRef(t *testing.T) {
 
 	cl.SetInClusterIPPoolRef(pool)
 	require.Equal(t, cl.Status.InClusterIPPoolRef[0].Name, pool.GetName())
+}
+
+func zonePool(name, zone, family string) *ipamicv1.InClusterIPPool {
+	pool := &ipamicv1.InClusterIPPool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   metav1.NamespaceDefault,
+			Annotations: map[string]string{ProxmoxIPFamilyAnnotation: family},
+		},
+	}
+	if zone != "" {
+		pool.Labels = map[string]string{ProxmoxZoneLabel: zone}
+	}
+
+	return pool
+}
+
+func TestAddInClusterZoneRef(t *testing.T) {
+	cl := defaultCluster()
+
+	// default zone (no zone label) plus two labelled zones, both IP families each.
+	cl.AddInClusterZoneRef(zonePool("test-v4-icip", "", IPv4Type))
+	cl.AddInClusterZoneRef(zonePool("test-zone1-v4-icip", "zone1", IPv4Type))
+	cl.AddInClusterZoneRef(zonePool("test-zone1-v6-icip", "zone1", IPv6Type))
+	cl.AddInClusterZoneRef(zonePool("test-zone2-v4-icip", "zone2", IPv4Type))
+	cl.AddInClusterZoneRef(zonePool("test-zone2-v6-icip", "zone2", IPv6Type))
+
+	require.Len(t, cl.Status.InClusterZoneRef, 3)
+
+	byZone := make(map[string]InClusterZoneRef)
+	for _, ref := range cl.Status.InClusterZoneRef {
+		byZone[*ref.Zone] = ref
+	}
+
+	require.Equal(t, "test-v4-icip", byZone["default"].InClusterIPPoolRefV4.Name)
+	require.Nil(t, byZone["default"].InClusterIPPoolRefV6)
+	require.Equal(t, "test-zone1-v4-icip", byZone["zone1"].InClusterIPPoolRefV4.Name)
+	require.Equal(t, "test-zone1-v6-icip", byZone["zone1"].InClusterIPPoolRefV6.Name)
+	require.Equal(t, "test-zone2-v4-icip", byZone["zone2"].InClusterIPPoolRefV4.Name)
+	require.Equal(t, "test-zone2-v6-icip", byZone["zone2"].InClusterIPPoolRefV6.Name)
+
+	// updating an existing zone's pool ref must not append a new entry.
+	cl.AddInClusterZoneRef(zonePool("test-zone1-v4-icip-new", "zone1", IPv4Type))
+	require.Len(t, cl.Status.InClusterZoneRef, 3)
 }
