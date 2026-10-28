@@ -197,6 +197,21 @@ type ZoneConfigSpec struct {
 	// +optional
 	// +structType=atomic
 	SchedulerHints *SchedulerHints `json:"schedulerHints,omitempty,omitzero"`
+
+	// vmTags is a list of tags the provider applies to every VM placed in
+	// this zone, control planes included, in addition to the machine's own
+	// spec.tags. Typical use: zone markers and pin tags consumed by an
+	// external balancer.
+	//
+	// Tags are applied at provisioning time only: changing this list does
+	// not re-tag existing VMs, and removing a tag here never removes it
+	// from a VM.
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=30
+	// +kubebuilder:validation:items:Pattern=`^(?i)[a-z0-9_][a-z0-9_\-\+\.]*$`
+	VMTags []string `json:"vmTags,omitempty"`
 }
 
 // IPConfigSpec contains information about available IP config.

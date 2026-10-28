@@ -620,6 +620,37 @@ func TestReconcileVirtualMachineConfigTags(t *testing.T) {
 	require.EqualValues(t, task.UPID, *machineScope.ProxmoxMachine.Status.TaskRef)
 }
 
+// TestReconcileVirtualMachineConfigZoneVMTags verifies that the tags a zone
+// declares through vmTags are applied to the VM together with the machine's
+// own tags, deduplicating the overlap between the two lists.
+func TestReconcileVirtualMachineConfigZoneVMTags(t *testing.T) {
+	machineScope, zoneClient := setupZonedReconcilerTest(t, "it-test",
+		func(_ *clusterv1.Machine, infraCluster *infrav1.ProxmoxCluster, infraMachine *infrav1.ProxmoxMachine) {
+			infraCluster.Spec.ZoneConfigs[0].VMTags = []string{"zone-it-test", "plb_pin_node1", "tag1"}
+			infraMachine.Spec.Tags = []string{"tag1", "tag2"}
+		})
+	conditions.Set(machineScope.ProxmoxMachine, metav1.Condition{
+		Type:   infrav1.ProxmoxMachineVirtualMachineProvisionedCondition,
+		Status: metav1.ConditionFalse,
+		Reason: infrav1.ProxmoxMachineVirtualMachineProvisionedCloningReason,
+	})
+
+	vm := newStoppedVM()
+	vm.VirtualMachineConfig.Tags = "from-template"
+	task := newTask()
+	machineScope.SetVirtualMachine(vm)
+	expectedOptions := []any{
+		proxmox.VirtualMachineOption{Name: optionTags, Value: "from-template;tag1;tag2;zone-it-test;plb_pin_node1"},
+	}
+
+	zoneClient.EXPECT().ConfigureVM(context.Background(), vm, expectedOptions...).Return(task, nil).Once()
+
+	requeue, err := reconcileVirtualMachineConfig(context.Background(), machineScope)
+	require.NoError(t, err)
+	require.True(t, requeue)
+	require.EqualValues(t, task.UPID, *machineScope.ProxmoxMachine.Status.TaskRef)
+}
+
 func TestReconcileDisks_RunningVM(t *testing.T) {
 	machineScope, _, _ := setupReconcilerTestWithCondition(t, infrav1.ProxmoxMachineVirtualMachineProvisionedCloningReason)
 	machineScope.ProxmoxMachine.Spec.Disks = &infrav1.Storage{

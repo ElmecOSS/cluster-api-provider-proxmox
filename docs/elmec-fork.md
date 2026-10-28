@@ -18,6 +18,7 @@ provider's; this is only the index.
 | CPU-aware scheduling: CPU as a hard-fit constraint and a scoring dimension beside memory, weighted by tolerances | [advanced-setups.md](advanced-setups.md#cpu-aware-scheduling) |
 | Per-zone `schedulerHints`, for zones sitting on different hardware | [advanced-setups.md](advanced-setups.md#per-zone-scheduler-hints) |
 | Spreading machines across zones before choosing a node within one | [advanced-setups.md](advanced-setups.md#spreading-across-zones) |
+| Per-zone `vmTags`, applied by the provider to every VM in the zone (control planes included) | [advanced-setups.md](advanced-setups.md#per-zone-vm-tags) |
 
 ## Branch model
 

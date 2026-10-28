@@ -1523,6 +1523,23 @@ spec:
                       - message: Must specify either templateID or templateSelector
                         rule: has(self.templateSelector) || (has(self.templateID)
                           && has(self.sourceNode))
+                    vmTags:
+                      description: |-
+                        vmTags is a list of tags the provider applies to every VM placed in
+                        this zone, control planes included, in addition to the machine's own
+                        spec.tags. Typical use: zone markers and pin tags consumed by an
+                        external balancer.
+
+                        Tags are applied at provisioning time only: changing this list does
+                        not re-tag existing VMs, and removing a tag here never removes it
+                        from a VM.
+                      items:
+                        pattern: ^(?i)[a-z0-9_][a-z0-9_\-\+\.]*$
+                        type: string
+                      maxItems: 30
+                      minItems: 1
+                      type: array
+                      x-kubernetes-list-type: set
                     zone:
                       description: zone is the name of your deployment zone.
                       pattern: ^[a-z0-9A-Z](?:[a-z0-9A-Z-_.]{0,61}[a-z0-9A-Z])?$
