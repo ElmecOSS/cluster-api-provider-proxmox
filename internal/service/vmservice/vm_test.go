@@ -310,6 +310,40 @@ func TestEnsureVirtualMachine_CreateVM_SelectNode_InsufficientMemory(t *testing.
 	require.True(t, machineScope.HasFailed())
 }
 
+func TestEnsureVirtualMachine_CreateVM_RetryAfterCloningFailed_ResetsReason(t *testing.T) {
+	machineScope, proxmoxClient, _ := setupReconcilerTestWithCondition(t, infrav1.ProxmoxMachineVirtualMachineProvisionedCloningFailedReason)
+
+	expectedOptions := proxmox.VMCloneRequest{Node: "node1", Name: "test", Full: true}
+	response := proxmox.VMCloneResponse{NewID: 123, Task: newTask()}
+	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions).Return(response, nil).Once()
+
+	requeue, err := ensureVirtualMachine(context.Background(), machineScope)
+	require.NoError(t, err)
+	require.True(t, requeue)
+
+	// The successful retry must put the state machine back on the Cloning
+	// track, otherwise reconcileVirtualMachineConfig is skipped and the VM
+	// keeps the template's network and sizing.
+	require.Equal(t, infrav1.ProxmoxMachineVirtualMachineProvisionedCloningReason,
+		conditions.GetReason(machineScope.ProxmoxMachine, infrav1.ProxmoxMachineVirtualMachineProvisionedCondition))
+}
+
+func TestEnsureVirtualMachine_CreateVM_RetryAfterCloningFailed_KeepsReasonOnFailure(t *testing.T) {
+	machineScope, proxmoxClient, _ := setupReconcilerTestWithCondition(t, infrav1.ProxmoxMachineVirtualMachineProvisionedCloningFailedReason)
+
+	expectedOptions := proxmox.VMCloneRequest{Node: "node1", Name: "test", Full: true}
+	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions).
+		Return(proxmox.VMCloneResponse{}, fmt.Errorf("500 not authorized to access endpoint")).Once()
+
+	_, err := ensureVirtualMachine(context.Background(), machineScope)
+	require.Error(t, err)
+
+	cond := conditions.Get(machineScope.ProxmoxMachine, infrav1.ProxmoxMachineVirtualMachineProvisionedCondition)
+	require.NotNil(t, cond)
+	require.Equal(t, infrav1.ProxmoxMachineVirtualMachineProvisionedCloningFailedReason, cond.Reason)
+	require.Contains(t, cond.Message, "not authorized")
+}
+
 func TestEnsureVirtualMachine_CreateVM_VMIDRange(t *testing.T) {
 	machineScope, proxmoxClient, _ := setupReconcilerTestWithCondition(t, infrav1.ProxmoxMachineVirtualMachineProvisionedCloningReason)
 	machineScope.ProxmoxMachine.Spec.VMIDRange = &infrav1.VMIDRange{

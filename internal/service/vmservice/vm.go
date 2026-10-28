@@ -252,6 +252,18 @@ func ensureVirtualMachine(ctx context.Context, machineScope *scope.MachineScope)
 		machineScope.SetVirtualMachineID(resp.NewID)
 		machineScope.SetAnnotation(vmIDAllocatedByControllerAnnotation, "true")
 
+		// A previous attempt may have left the condition at CloningFailed.
+		// Reset it now that a new clone task exists, otherwise the post-clone
+		// steps gated on the Cloning reason (reconcileVirtualMachineConfig and
+		// friends) are skipped on the retry and the VM keeps the template's
+		// network and sizing. Resetting only on a successful clone keeps the
+		// failure message visible while the retries themselves keep failing.
+		conditions.Set(machineScope.ProxmoxMachine, metav1.Condition{
+			Type:   infrav1.ProxmoxMachineVirtualMachineProvisionedCondition,
+			Status: metav1.ConditionFalse,
+			Reason: infrav1.ProxmoxMachineVirtualMachineProvisionedCloningReason,
+		})
+
 		// requeue until cloning is finished
 		return true, nil
 	}
