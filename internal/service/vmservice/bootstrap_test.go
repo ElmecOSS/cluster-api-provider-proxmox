@@ -20,8 +20,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/url"
 	"reflect"
 	"slices"
+	"syscall"
 	"testing"
 
 	"github.com/luthermonson/go-proxmox"
@@ -281,6 +285,57 @@ func TestReconcileBootstrapData_BadInjector(t *testing.T) {
 	require.False(t, requeue)
 	require.True(t, conditions.Has(machineScope.ProxmoxMachine, infrav1.ProxmoxMachineVirtualMachineProvisionedCondition))
 	require.Nil(t, machineScope.ProxmoxMachine.Status.BootstrapDataProvided)
+}
+
+// TestReconcileBootstrapData_TransientInjectorError verifies that a
+// transport-level injection failure (e.g. pveproxy dropping the ISO upload
+// with EOF) is returned for a retry instead of marking the machine with the
+// terminal VMProvisionFailed reason.
+func TestReconcileBootstrapData_TransientInjectorError(t *testing.T) {
+	machineScope, _, kubeClient := setupReconcilerTestWithCondition(t, infrav1.ProxmoxMachineVirtualMachineProvisionedWaitingForBootstrapDataReconciliationReason)
+	setupVMWithMetadata(machineScope)
+	createBootstrapSecret(t, kubeClient, machineScope, cloudinit.FormatCloudConfig)
+
+	// NetworkSetup
+	defaultPool := addDefaultIPPool(machineScope)
+
+	createIPPools(t, kubeClient, machineScope)
+	createIPAddress(t, kubeClient, machineScope, infrav1.DefaultNetworkDevice, "10.10.10.10", 0, &defaultPool)
+
+	getISOInjector = func(_ *proxmox.VirtualMachine, _ []byte, _, _ cloudinit.Renderer) isoInjector {
+		return FakeISOInjector{Error: &url.Error{Op: "Post", URL: "https://pve.example.com/api2/json/nodes/node1/storage/local/upload", Err: io.EOF}}
+	}
+	t.Cleanup(func() { getISOInjector = defaultISOInjector })
+
+	requeue, err := reconcileBootstrapData(context.Background(), machineScope)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to inject bootstrap data")
+	require.False(t, requeue)
+	// The reason must stay on the retryable track, not VMProvisionFailed.
+	require.Equal(t, infrav1.ProxmoxMachineVirtualMachineProvisionedWaitingForBootstrapDataReconciliationReason,
+		conditions.GetReason(machineScope.ProxmoxMachine, infrav1.ProxmoxMachineVirtualMachineProvisionedCondition))
+	require.Nil(t, machineScope.ProxmoxMachine.Status.BootstrapDataProvided)
+}
+
+func TestIsTransientInjectError(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		err       error
+		transient bool
+	}{
+		{"plain EOF", io.EOF, true},
+		{"wrapped EOF from upload", fmt.Errorf("unable to inject CloudInit ISO: %w", &url.Error{Op: "Post", URL: "https://pve/upload", Err: io.EOF}), true},
+		{"unexpected EOF", io.ErrUnexpectedEOF, true},
+		{"deadline exceeded", context.DeadlineExceeded, true},
+		{"connection refused", &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, true},
+		{"connection reset", fmt.Errorf("request failed: %w", &net.OpError{Op: "read", Err: syscall.ECONNRESET}), true},
+		{"proxmox api error", errors.New("500 unable to create image: storage 'local' is full"), false},
+		{"malformed data", errors.New("unable to render network-config"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.transient, isTransientInjectError(tc.err))
+		})
+	}
 }
 
 func TestGetBootstrapData_MissingSecretName(t *testing.T) {

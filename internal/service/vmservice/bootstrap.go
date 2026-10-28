@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
+	"net"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -93,6 +95,14 @@ func reconcileBootstrapData(ctx context.Context, machineScope *scope.MachineScop
 		err = injectCloudInit(ctx, machineScope, bootstrapData, biosUUID, nicData, kubernetesVersion)
 	}
 	if err != nil {
+		if isTransientInjectError(err) {
+			// A transport-level failure (e.g. pveproxy dropping the ISO
+			// upload with EOF) says nothing about the machine itself.
+			// Return the error without the terminal reason, so the
+			// controller retries the injection with its usual backoff.
+			machineScope.Logger.V(0).Error(err, "transient failure injecting bootstrap data, retrying")
+			return false, errors.Wrap(err, "failed to inject bootstrap data")
+		}
 		// Todo: test this (colliding default gateways for example)
 		conditions.Set(machineScope.ProxmoxMachine, metav1.Condition{
 			Type:    infrav1.ProxmoxMachineVirtualMachineProvisionedCondition,
@@ -384,6 +394,26 @@ func getVirtualNetworkDevices(_ context.Context, _ *scope.MachineScope, networkS
 		networkConfigData = append(networkConfigData, *config)
 	}
 	return networkConfigData, nil
+}
+
+// isTransientInjectError reports whether a bootstrap-data injection failure
+// is a transport-level error worth retrying (dropped connections, timeouts),
+// as opposed to a deterministic one such as malformed data or an API error
+// reported by Proxmox. Anything this predicate does not recognize counts as
+// terminal, which keeps today's behavior for unknown errors.
+func isTransientInjectError(err error) bool {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	// Dial, read and write failures (connection refused/reset, broken pipe)
+	// surface as *net.OpError. Certificate and authentication problems do
+	// not, so they stay terminal.
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 func vmHasMacAddresses(machineScope *scope.MachineScope) bool {
