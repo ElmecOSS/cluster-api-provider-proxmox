@@ -252,6 +252,18 @@ func ensureVirtualMachine(ctx context.Context, machineScope *scope.MachineScope)
 		machineScope.SetVirtualMachineID(resp.NewID)
 		machineScope.SetAnnotation(vmIDAllocatedByControllerAnnotation, "true")
 
+		// A previous attempt may have left the condition at CloningFailed.
+		// Reset it now that a new clone task exists, otherwise the post-clone
+		// steps gated on the Cloning reason (reconcileVirtualMachineConfig and
+		// friends) are skipped on the retry and the VM keeps the template's
+		// network and sizing. Resetting only on a successful clone keeps the
+		// failure message visible while the retries themselves keep failing.
+		conditions.Set(machineScope.ProxmoxMachine, metav1.Condition{
+			Type:   infrav1.ProxmoxMachineVirtualMachineProvisionedCondition,
+			Status: metav1.ConditionFalse,
+			Reason: infrav1.ProxmoxMachineVirtualMachineProvisionedCloningReason,
+		})
+
 		// requeue until cloning is finished
 		return true, nil
 	}
@@ -346,17 +358,24 @@ func reconcileVirtualMachineConfig(ctx context.Context, machineScope *scope.Mach
 		}
 	}
 
-	// custom tags
-	if machineScope.ProxmoxMachine.Spec.Tags != nil {
+	// custom tags: the machine's own tags plus the ones its zone declares
+	// for every VM placed in it. The two lists may overlap (e.g. while a
+	// cluster class still tags workers through the template), so dedup
+	// against the growing slice rather than with HasTag, which always
+	// reports false on a VM that has no tags yet.
+	customTags := slices.Concat(machineScope.ProxmoxMachine.Spec.Tags, machineScope.ZoneVMTags())
+	if len(customTags) > 0 {
 		machineScope.VirtualMachine.SplitTags()
-		length := len(machineScope.VirtualMachine.VirtualMachineConfig.TagsSlice)
-		for _, tag := range machineScope.ProxmoxMachine.Spec.Tags {
-			if !machineScope.VirtualMachine.HasTag(tag) {
-				machineScope.VirtualMachine.VirtualMachineConfig.TagsSlice = append(machineScope.VirtualMachine.VirtualMachineConfig.TagsSlice, tag)
+		tags := machineScope.VirtualMachine.VirtualMachineConfig.TagsSlice
+		length := len(tags)
+		for _, tag := range customTags {
+			if !slices.Contains(tags, tag) {
+				tags = append(tags, tag)
 			}
 		}
-		if len(machineScope.VirtualMachine.VirtualMachineConfig.TagsSlice) > length {
-			vmOptions = append(vmOptions, proxmox.VirtualMachineOption{Name: optionTags, Value: strings.Join(machineScope.VirtualMachine.VirtualMachineConfig.TagsSlice, ";")})
+		if len(tags) > length {
+			machineScope.VirtualMachine.VirtualMachineConfig.TagsSlice = tags
+			vmOptions = append(vmOptions, proxmox.VirtualMachineOption{Name: optionTags, Value: strings.Join(tags, ";")})
 		}
 	}
 

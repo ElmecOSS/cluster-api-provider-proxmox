@@ -310,6 +310,40 @@ func TestEnsureVirtualMachine_CreateVM_SelectNode_InsufficientMemory(t *testing.
 	require.True(t, machineScope.HasFailed())
 }
 
+func TestEnsureVirtualMachine_CreateVM_RetryAfterCloningFailed_ResetsReason(t *testing.T) {
+	machineScope, proxmoxClient, _ := setupReconcilerTestWithCondition(t, infrav1.ProxmoxMachineVirtualMachineProvisionedCloningFailedReason)
+
+	expectedOptions := proxmox.VMCloneRequest{Node: "node1", Name: "test", Full: true}
+	response := proxmox.VMCloneResponse{NewID: 123, Task: newTask()}
+	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions).Return(response, nil).Once()
+
+	requeue, err := ensureVirtualMachine(context.Background(), machineScope)
+	require.NoError(t, err)
+	require.True(t, requeue)
+
+	// The successful retry must put the state machine back on the Cloning
+	// track, otherwise reconcileVirtualMachineConfig is skipped and the VM
+	// keeps the template's network and sizing.
+	require.Equal(t, infrav1.ProxmoxMachineVirtualMachineProvisionedCloningReason,
+		conditions.GetReason(machineScope.ProxmoxMachine, infrav1.ProxmoxMachineVirtualMachineProvisionedCondition))
+}
+
+func TestEnsureVirtualMachine_CreateVM_RetryAfterCloningFailed_KeepsReasonOnFailure(t *testing.T) {
+	machineScope, proxmoxClient, _ := setupReconcilerTestWithCondition(t, infrav1.ProxmoxMachineVirtualMachineProvisionedCloningFailedReason)
+
+	expectedOptions := proxmox.VMCloneRequest{Node: "node1", Name: "test", Full: true}
+	proxmoxClient.EXPECT().CloneVM(context.Background(), 123, expectedOptions).
+		Return(proxmox.VMCloneResponse{}, fmt.Errorf("500 not authorized to access endpoint")).Once()
+
+	_, err := ensureVirtualMachine(context.Background(), machineScope)
+	require.Error(t, err)
+
+	cond := conditions.Get(machineScope.ProxmoxMachine, infrav1.ProxmoxMachineVirtualMachineProvisionedCondition)
+	require.NotNil(t, cond)
+	require.Equal(t, infrav1.ProxmoxMachineVirtualMachineProvisionedCloningFailedReason, cond.Reason)
+	require.Contains(t, cond.Message, "not authorized")
+}
+
 func TestEnsureVirtualMachine_CreateVM_VMIDRange(t *testing.T) {
 	machineScope, proxmoxClient, _ := setupReconcilerTestWithCondition(t, infrav1.ProxmoxMachineVirtualMachineProvisionedCloningReason)
 	machineScope.ProxmoxMachine.Spec.VMIDRange = &infrav1.VMIDRange{
@@ -581,6 +615,37 @@ func TestReconcileVirtualMachineConfigTags(t *testing.T) {
 	})
 
 	requeue, err = reconcileVirtualMachineConfig(context.Background(), machineScope)
+	require.NoError(t, err)
+	require.True(t, requeue)
+	require.EqualValues(t, task.UPID, *machineScope.ProxmoxMachine.Status.TaskRef)
+}
+
+// TestReconcileVirtualMachineConfigZoneVMTags verifies that the tags a zone
+// declares through vmTags are applied to the VM together with the machine's
+// own tags, deduplicating the overlap between the two lists.
+func TestReconcileVirtualMachineConfigZoneVMTags(t *testing.T) {
+	machineScope, zoneClient := setupZonedReconcilerTest(t, "it-test",
+		func(_ *clusterv1.Machine, infraCluster *infrav1.ProxmoxCluster, infraMachine *infrav1.ProxmoxMachine) {
+			infraCluster.Spec.ZoneConfigs[0].VMTags = []string{"zone-it-test", "plb_pin_node1", "tag1"}
+			infraMachine.Spec.Tags = []string{"tag1", "tag2"}
+		})
+	conditions.Set(machineScope.ProxmoxMachine, metav1.Condition{
+		Type:   infrav1.ProxmoxMachineVirtualMachineProvisionedCondition,
+		Status: metav1.ConditionFalse,
+		Reason: infrav1.ProxmoxMachineVirtualMachineProvisionedCloningReason,
+	})
+
+	vm := newStoppedVM()
+	vm.VirtualMachineConfig.Tags = "from-template"
+	task := newTask()
+	machineScope.SetVirtualMachine(vm)
+	expectedOptions := []any{
+		proxmox.VirtualMachineOption{Name: optionTags, Value: "from-template;tag1;tag2;zone-it-test;plb_pin_node1"},
+	}
+
+	zoneClient.EXPECT().ConfigureVM(context.Background(), vm, expectedOptions...).Return(task, nil).Once()
+
+	requeue, err := reconcileVirtualMachineConfig(context.Background(), machineScope)
 	require.NoError(t, err)
 	require.True(t, requeue)
 	require.EqualValues(t, task.UPID, *machineScope.ProxmoxMachine.Status.TaskRef)

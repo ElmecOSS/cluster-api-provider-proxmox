@@ -254,6 +254,40 @@ spec:
 
 **The override is total**: zone and cluster hints are never merged, exactly as for `templateSource`. A zone that sets only `cpuAdjustment` does **not** keep the cluster's `memoryAdjustment` — it falls back to the built-in default. Spell out every field the zone needs; the admission webhook warns when a partial override drops a value the cluster had set.
 
+#### Per-zone VM tags
+
+A zone may declare `vmTags`: tags the provider applies to **every** VM placed
+in that zone, control planes included, on top of the machine's own
+`spec.tags`. The provider treats them as opaque strings; what they mean is up
+to whatever reads them. The typical use is an external balancer that honors
+pin tags, so VMs stay on the nodes of their failure domain even when the
+balancer moves things around:
+
+```yaml
+spec:
+  zoneConfig:
+    - zone: dc1
+      dnsServers: [8.8.8.8]
+      nodes: [node1, node2]
+      vmTags:
+        - zone-dc1
+        - plb_pin_node1
+        - plb_pin_node2
+```
+
+Three things to know before relying on them:
+
+- **Provisioning-time only.** Tags are written while the VM is configured,
+  before its first boot. Changing `vmTags` later does not re-tag existing
+  VMs, and a tag removed from the list (or deleted by hand in Proxmox) is
+  never removed or re-added by the provider.
+- **Additive merge.** Zone tags are added to the machine's `spec.tags` and to
+  whatever tags the template already carries; duplicates between the lists
+  are applied once.
+- **A short untagged window exists** between the end of the clone and the
+  configuration step. The VM is powered off for all of it, so a balancer
+  that only moves running guests never sees it.
+
 #### Spreading across zones
 
 Everything above decides *which node*. When the candidate nodes belong to more

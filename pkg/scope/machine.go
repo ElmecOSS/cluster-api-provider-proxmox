@@ -304,6 +304,22 @@ func (m *MachineScope) SchedulerHints() *infrav1.SchedulerHints {
 	return m.schedulerHints
 }
 
+// ZoneVMTags returns the tags the machine's zone declares for every VM
+// placed in it, or nil when the machine has no zone or the zone declares
+// none.
+func (m *MachineScope) ZoneVMTags() []string {
+	zoneName := ptr.Deref(m.zone, "")
+	if zoneName == "" {
+		return nil
+	}
+	for _, zc := range m.InfraCluster.ProxmoxCluster.Spec.ZoneConfigs {
+		if ptr.Deref(zc.Zone, "") == zoneName {
+			return zc.VMTags
+		}
+	}
+	return nil
+}
+
 // SourceNode returns the effective Proxmox node to clone this machine from.
 func (m *MachineScope) SourceNode() string {
 	return ptr.Deref(m.templateSource.SourceNode, "")
